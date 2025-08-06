@@ -22,8 +22,8 @@ RUN mkdir -p auth
 # Copy application code
 COPY . .
 
-# Expose port
-EXPOSE 8080
+# Expose port (Railway will inject the actual PORT)
+EXPOSE $PORT
 
-# Start the application
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"] 
+# Start the application using Railway's PORT environment variable
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port $PORT"] 
