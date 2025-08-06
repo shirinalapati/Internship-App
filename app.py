@@ -10,17 +10,10 @@ from resume_parser.parse_resume import parse_resume
 from job_scrapers.dispatcher import scrape_all_company_sites
 from matching.matcher import match_job_to_resume
 
-# Import authentication
-from auth.oauth import oauth, get_user_info_google, get_user_info_apple
-from auth.session import session_manager
-
 app = FastAPI()
 
 # Add session middleware (required for OAuth)
 app.add_middleware(SessionMiddleware, secret_key=os.getenv('SECRET_KEY', 'your-secret-key-change-in-production'))
-
-# Initialize OAuth
-oauth.init_app(app)
 
 # Template directory
 templates = Jinja2Templates(directory="templates")
@@ -80,122 +73,24 @@ def is_valid_resume(text):
     # Default: if it has some resume indicators, accept it
     return resume_score > 0
 
-# Authentication routes
-@app.get("/login")
-async def login_page(request: Request):
-    """Display login page with Google and Apple options"""
-    # Check if user is already logged in
-    if session_manager.is_authenticated(request):
-        return RedirectResponse(url="/dashboard", status_code=302)
-    
-    return templates.TemplateResponse("login.html", {"request": request})
-
-@app.get("/auth/{provider}")
-async def auth_redirect(provider: str, request: Request):
-    """Redirect to OAuth provider"""
-    if provider not in ['google', 'apple']:
-        raise HTTPException(status_code=400, detail="Invalid provider")
-    
-    client = oauth.create_client(provider)
-    redirect_uri = request.url_for('auth_callback', provider=provider)
-    return await client.authorize_redirect(request, redirect_uri)
-
-@app.get("/auth/{provider}/callback")
-async def auth_callback(provider: str, request: Request):
-    """Handle OAuth callback"""
-    if provider not in ['google', 'apple']:
-        raise HTTPException(status_code=400, detail="Invalid provider")
-    
-    try:
-        client = oauth.create_client(provider)
-        token = await client.authorize_access_token(request)
-        
-        # Get user info based on provider
-        if provider == 'google':
-            user_info = await get_user_info_google(token)
-        else:  # apple
-            user_info = await get_user_info_apple(token)
-        
-        if not user_info:
-            raise HTTPException(status_code=400, detail="Failed to get user information")
-        
-        # Add provider info
-        user_info['provider'] = provider
-        
-        # Create session
-        session_id = session_manager.create_session(user_info)
-        
-        # Create response and set cookie
-        response = RedirectResponse(url="/dashboard", status_code=302)
-        response.set_cookie(
-            key="session_id", 
-            value=session_id, 
-            httponly=True, 
-            secure=True,  # Set to True in production with HTTPS
-            samesite="lax",
-            max_age=7*24*60*60  # 7 days
-        )
-        
-        return response
-        
-    except Exception as e:
-        print(f"Auth error: {e}")
-        return RedirectResponse(url="/login?error=auth_failed", status_code=302)
-
-@app.get("/logout")
-async def logout(request: Request):
-    """Logout user and clear session"""
-    session_id = request.cookies.get('session_id')
-    if session_id:
-        session_manager.delete_session(session_id)
-    
-    response = RedirectResponse(url="/login", status_code=302)
-    response.delete_cookie("session_id")
-    return response
-
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    """Redirect to login or dashboard based on auth status"""
-    if session_manager.is_authenticated(request):
-        return RedirectResponse(url="/dashboard", status_code=302)
-    else:
-        return RedirectResponse(url="/login", status_code=302)
-
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    """Main dashboard - requires authentication"""
-    if not session_manager.is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=302)
-    
-    user = session_manager.get_current_user(request)
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request, 
-        "results": None, 
-        "user": user
-    })
+    return templates.TemplateResponse("index.html", {"request": request, "results": None})
 
 @app.post("/match", response_class=HTMLResponse)
 async def match_resume(request: Request, resume: UploadFile = File(...)):
     """
     Accepts a resume upload and returns matching internships with detailed analysis.
-    Requires authentication.
     """
-    # Check authentication
-    if not session_manager.is_authenticated(request):
-        return RedirectResponse(url="/login", status_code=302)
-    
-    user = session_manager.get_current_user(request)
-    
     # Validate file type
     allowed_extensions = ['.pdf', '.png', '.jpg', '.jpeg']
     file_extension = os.path.splitext(resume.filename)[1].lower()
     
     if file_extension not in allowed_extensions:
-        return templates.TemplateResponse("dashboard.html", {
+        return templates.TemplateResponse("index.html", {
             "request": request,
             "results": None,
-            "error": "Please upload a valid file (PDF, PNG, JPG, or JPEG).",
-            "user": user
+            "error": "Please upload a valid file (PDF, PNG, JPG, or JPEG)."
         })
     
     # Save uploaded file
@@ -213,31 +108,28 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         
         # Validate that this is actually a resume
         if not is_valid_resume(resume_text):
-            return templates.TemplateResponse("dashboard.html", {
+            return templates.TemplateResponse("index.html", {
                 "request": request,
                 "results": None,
-                "error": "A valid resume wasn't uploaded. Please try again with a proper resume file.",
-                "user": user
+                "error": "A valid resume wasn't uploaded. Please try again with a proper resume file."
             })
         
         print("🔍 Extracted resume skills:", resume_skills)
         
         # Check if any skills were extracted
         if not resume_skills:
-            return templates.TemplateResponse("dashboard.html", {
+            return templates.TemplateResponse("index.html", {
                 "request": request,
                 "results": None,
-                "error": "No skills were detected in your resume. Please make sure your resume includes technical skills, programming languages, or relevant experience.",
-                "user": user
+                "error": "No skills were detected in your resume. Please make sure your resume includes technical skills, programming languages, or relevant experience."
             })
         
     except Exception as e:
         print(f"❌ Error parsing resume: {e}")
-        return templates.TemplateResponse("dashboard.html", {
+        return templates.TemplateResponse("index.html", {
             "request": request,
             "results": None,
-            "error": "Error processing your resume. Please make sure the file is not corrupted and try again.",
-            "user": user
+            "error": "Error processing your resume. Please make sure the file is not corrupted and try again."
         })
     
     # Scrape internships from multiple sources
@@ -247,11 +139,10 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
     
     if len(jobs) == 0:
         print("❌ No jobs were scraped - this is the problem!")
-        return templates.TemplateResponse("dashboard.html", {
+        return templates.TemplateResponse("index.html", {
             "request": request,
             "results": [],
-            "error": "Unable to fetch internship opportunities at the moment. Please try again later.",
-            "user": user
+            "error": "Unable to fetch internship opportunities at the moment. Please try again later."
         })
     
     print("🔍 Sample job data:")
@@ -277,8 +168,7 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
             })
 
     print(f"✅ Final matched jobs: {len(matched_jobs)}")
-    return templates.TemplateResponse("dashboard.html", {
+    return templates.TemplateResponse("index.html", {
         "request": request,
-        "results": matched_jobs,
-        "user": user
+        "results": matched_jobs
     })
