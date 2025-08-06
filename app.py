@@ -187,6 +187,24 @@ async def oauth_callback(request: Request, provider: str, code: str = None, stat
             "provider": "google"
         }
         
+        # Store user metadata
+        try:
+            from auth.user_metadata import user_metadata_store
+            
+            # Store user metadata
+            user_metadata_store.store_user_metadata(
+                user_id=user["id"],
+                user_info=user_info
+            )
+            
+            # Update login count if user exists
+            user_metadata_store.update_user_login(user["id"])
+            
+            print(f"✅ User metadata stored for: {user['email']}")
+            
+        except Exception as e:
+            print(f"⚠️ Could not store user metadata: {e}")
+        
         request.session["user"] = user
         print(f"✅ User logged in successfully: {user['email']}")
         
@@ -249,6 +267,24 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         
         print("🔍 Extracted resume skills:", resume_skills)
         
+        # Store resume skills in user metadata if user is logged in
+        if user and user.get("id"):
+            try:
+                from auth.user_metadata import user_metadata_store
+                
+                # Update resume upload with extracted skills
+                resume_info = {
+                    "filename": resume.filename,
+                    "file_size": resume.size if hasattr(resume, 'size') else 0,
+                    "skills": resume_skills
+                }
+                
+                user_metadata_store.add_resume_upload(user["id"], resume_info)
+                print(f"✅ Updated resume metadata with skills for user: {user.get('email')}")
+                
+            except Exception as e:
+                print(f"⚠️ Could not update resume metadata: {e}")
+        
         # Check if any skills were extracted
         if not resume_skills:
             return templates.TemplateResponse("index.html", {
@@ -293,7 +329,7 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         
         # Only include jobs with a meaningful match (score > 0)
         if score > 0:
-            matched_jobs.append({
+            job_match = {
                 "title": job["title"],
                 "score": score,
                 "description": job.get("description", ""),
@@ -301,7 +337,27 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
                 "location": job.get("location", ""),
                 "apply_link": job.get("apply_link", ""),
                 "match_description": description
-            })
+            }
+            
+            matched_jobs.append(job_match)
+            
+            # Store job match in user metadata if user is logged in
+            if user and user.get("id"):
+                try:
+                    from auth.user_metadata import user_metadata_store
+                    
+                    # Store job match metadata
+                    match_info = {
+                        "title": job["title"],
+                        "company": job.get("company", ""),
+                        "score": score,
+                        "skills_matched": [skill for skill in resume_skills if skill.lower() in job.get("required_skills", [])]
+                    }
+                    
+                    user_metadata_store.add_job_match(user["id"], match_info)
+                    
+                except Exception as e:
+                    print(f"⚠️ Could not store job match metadata: {e}")
 
     print(f"✅ Final matched jobs: {len(matched_jobs)}")
     return templates.TemplateResponse("index.html", {
