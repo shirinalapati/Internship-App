@@ -16,6 +16,9 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Create auth directory
+RUN mkdir -p auth
+
 # Copy application code
 COPY . .
 
