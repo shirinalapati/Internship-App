@@ -443,12 +443,14 @@
             <p>Supported formats: PDF, PNG, JPG, JPEG</p>
             
             <form method="post" action="/match" enctype="multipart/form-data" class="upload-form" id="uploadForm">
-                <label for="resume" class="file-input-wrapper">
+                <div class="file-input-wrapper">
                     <input type="file" id="resume" name="resume" class="file-input" accept=".pdf,.png,.jpg,.jpeg" required>
-                    <i class="fas fa-upload"></i> Choose Resume File
-                </label>
+                    <label for="resume" class="file-input-button">
+                        <i class="fas fa-upload"></i> Choose Resume File
+                    </label>
+                </div>
                 
-                <button type="submit" class="upload-btn" id="submitBtn">
+                <button type="submit" class="submit-button" id="submitBtn">
                     <i class="fas fa-search"></i> Find Matches
                 </button>
                 
@@ -523,7 +525,26 @@
     </div>
 
     <script>
-        document.getElementById('uploadForm').addEventListener('submit', function() {
+        document.getElementById('resume').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            const submitButton = document.getElementById('submitBtn');
+            
+            if (file) {
+                submitButton.classList.add('active');
+                console.log('File selected:', file.name);
+            } else {
+                submitButton.classList.remove('active');
+            }
+        });
+
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            const fileInput = document.getElementById('resume');
+            if (!fileInput.files[0]) {
+                e.preventDefault();
+                alert('Please select a file first.');
+                return;
+            }
+            
             document.getElementById('submitBtn').disabled = true;
             document.getElementById('submitBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
         });
