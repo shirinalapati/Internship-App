@@ -216,20 +216,22 @@
         {% endif %}
 
         <div class="auth-buttons">
-            <a href="/auth/google" class="auth-btn google-btn">
+            <!-- Temporarily disabled until OAuth is configured
+            <a href="/auth/google" class="google-btn">
                 <i class="fab fa-google"></i>
                 Continue with Google
             </a>
+            -->
+            
+            <div class="divider">
+                <span>or</span>
+            </div>
+            
+            <a href="/dashboard" class="continue-btn">
+                <i class="fas fa-arrow-right"></i>
+                Continue without signing in
+            </a>
         </div>
-
-        <div class="divider">
-            <span>or</span>
-        </div>
-
-        <a href="/dashboard" class="continue-btn">
-            <i class="fas fa-arrow-right"></i>
-            Continue without signing in
-        </a>
 
         <div class="features">
             <h3>🚀 What you'll get:</h3>
