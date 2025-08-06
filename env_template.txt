@@ -1,0 +1,11 @@
+# Google OAuth Credentials Template
+# Copy this to .env and replace with your actual credentials
+
+GOOGLE_CLIENT_ID=your_client_id_here
+GOOGLE_CLIENT_SECRET=your_client_secret_here
+
+# For local development
+GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
+
+# For production (Railway) - uncomment and update with your Railway URL
+# GOOGLE_REDIRECT_URI=https://your-railway-app-name.up.railway.app/auth/google/callback 

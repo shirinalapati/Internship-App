@@ -443,18 +443,19 @@
             <p>Supported formats: PDF, PNG, JPG, JPEG</p>
             
             <form method="post" action="/match" enctype="multipart/form-data" class="upload-form" id="uploadForm">
-                <div class="file-input-wrapper">
-                    <input type="file" name="resume" id="resume" class="file-input" accept=".pdf,.png,.jpg,.jpeg" required>
-                    <label for="resume" class="file-input-button">
-                        <i class="fas fa-cloud-upload-alt"></i>
-                        <span id="fileButtonText">Choose Resume File</span>
-                    </label>
-                </div>
-                <div class="file-info" id="fileInfo"></div>
-                <button type="submit" class="submit-button" id="submitButton">
-                    <i class="fas fa-search"></i>
-                    Find Matching Internships
+                <label for="resume" class="file-input-wrapper">
+                    <input type="file" id="resume" name="resume" class="file-input" accept=".pdf,.png,.jpg,.jpeg" required>
+                    <i class="fas fa-upload"></i> Choose Resume File
+                </label>
+                
+                <button type="submit" class="upload-btn" id="submitBtn">
+                    <i class="fas fa-search"></i> Find Matches
                 </button>
+                
+                <div class="file-info">
+                    <p>Supported formats: PDF, PNG, JPG, JPEG</p>
+                    <p>Maximum file size: 10MB</p>
+                </div>
             </form>
         </div>
 
@@ -522,27 +523,9 @@
     </div>
 
     <script>
-        document.getElementById('resume').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            const fileInfo = document.getElementById('fileInfo');
-            const submitButton = document.getElementById('submitButton');
-            const fileButtonText = document.getElementById('fileButtonText');
-            
-            if (file) {
-                fileInfo.textContent = `Selected: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
-                fileButtonText.textContent = 'Change File';
-                submitButton.classList.add('active');
-            } else {
-                fileInfo.textContent = '';
-                fileButtonText.textContent = 'Choose Resume File';
-                submitButton.classList.remove('active');
-            }
-        });
-
-        document.getElementById('uploadForm').addEventListener('submit', function(e) {
-            const submitButton = document.getElementById('submitButton');
-            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
-            submitButton.disabled = true;
+        document.getElementById('uploadForm').addEventListener('submit', function() {
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('submitBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
         });
     </script>
 </body>
