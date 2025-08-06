@@ -91,11 +91,27 @@ class UserMetadataStore:
                 if "resume_uploads" not in data[user_id]:
                     data[user_id]["resume_uploads"] = []
                 
+                # Extract enhanced metadata if available
+                resume_metadata = {}
+                if "metadata" in resume_info:
+                    resume_metadata = resume_info["metadata"]
+                
                 resume_record = {
                     "timestamp": datetime.now().isoformat(),
                     "filename": resume_info.get("filename"),
                     "skills_extracted": resume_info.get("skills", []),
-                    "file_size": resume_info.get("file_size")
+                    "file_size": resume_info.get("file_size"),
+                    "metadata": {
+                        "experience_level": resume_metadata.get("experience_level", "student"),
+                        "education_level": resume_metadata.get("education_level", "undergraduate"),
+                        "location_preferences": resume_metadata.get("location_preferences", []),
+                        "industry_preferences": resume_metadata.get("industry_preferences", []),
+                        "remote_preference": resume_metadata.get("remote_preference", False),
+                        "relocation_willingness": resume_metadata.get("relocation_willingness", False),
+                        "graduation_year": resume_metadata.get("graduation_year"),
+                        "gpa": resume_metadata.get("gpa"),
+                        "citizenship": resume_metadata.get("citizenship", "unknown")
+                    }
                 }
                 
                 data[user_id]["resume_uploads"].append(resume_record)

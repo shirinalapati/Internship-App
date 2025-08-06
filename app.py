@@ -271,16 +271,21 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         if user and user.get("id"):
             try:
                 from auth.user_metadata import user_metadata_store
+                from matching.metadata_matcher import extract_resume_metadata
                 
-                # Update resume upload with extracted skills
+                # Extract enhanced metadata from resume
+                resume_metadata = extract_resume_metadata(resume_skills, resume_text)
+                
+                # Update resume upload with extracted skills and metadata
                 resume_info = {
                     "filename": resume.filename,
                     "file_size": resume.size if hasattr(resume, 'size') else 0,
-                    "skills": resume_skills
+                    "skills": resume_skills,
+                    "metadata": resume_metadata
                 }
                 
                 user_metadata_store.add_resume_upload(user["id"], resume_info)
-                print(f"✅ Updated resume metadata with skills for user: {user.get('email')}")
+                print(f"✅ Updated resume metadata with skills and enhanced metadata for user: {user.get('email')}")
                 
             except Exception as e:
                 print(f"⚠️ Could not update resume metadata: {e}")

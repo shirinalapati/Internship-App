@@ -103,12 +103,26 @@ def analyze_job_requirements(job_title, job_description, required_skills):
 
 def match_job_to_resume(job, resume_skills, resume_text=""):
     """
-    Match a job to resume skills with comprehensive analysis.
+    Match a job to resume skills with comprehensive analysis including metadata.
     Returns: (score, description)
     """
+    from .metadata_matcher import (
+        extract_resume_metadata, 
+        extract_job_metadata, 
+        calculate_metadata_match_score,
+        combine_match_scores
+    )
+    
     job_skills = job.get("required_skills", [])
     job_title = job.get("title", "").lower()
     job_description = job.get("description", "").lower()
+    
+    # Extract metadata from resume and job
+    resume_metadata = extract_resume_metadata(resume_skills, resume_text)
+    job_metadata = extract_job_metadata(job)
+    
+    # Calculate metadata match score
+    metadata_score, metadata_description = calculate_metadata_match_score(resume_metadata, job_metadata)
     
     # Analyze user's experience level
     user_experience = extract_user_experience_level(resume_skills, resume_text)
@@ -186,25 +200,28 @@ def match_job_to_resume(job, resume_skills, resume_text=""):
     elif len(matched_skills) >= 2:
         bonus = 5
 
-    final_score = min(100, skill_score + bonus)
+    skill_score = min(100, skill_score + bonus)
 
-    # Generate detailed description with actual job requirements
-    if final_score >= 80:
-        description = f"✅ Excellent match! You have {len(matched_skills)} out of {len(job_skills)} required skills.\n\n📋 Job Requirements: {', '.join(job_skills)}\n\n🎯 Your matching skills: {', '.join(matched_skills)}\n\nPerfect for {user_experience} candidates."
-    elif final_score >= 60:
-        description = f"✅ Good match! You have {len(matched_skills)} out of {len(job_skills)} required skills.\n\n📋 Job Requirements: {', '.join(job_skills)}\n\n🎯 Your matching skills: {', '.join(matched_skills)}\n\nSuitable for {user_experience} candidates."
-    elif final_score >= 40:
-        description = f"⚠️ Moderate match. You have {len(matched_skills)} out of {len(job_skills)} required skills.\n\n📋 Job Requirements: {', '.join(job_skills)}\n\n🎯 Your matching skills: {', '.join(matched_skills)}\n\nConsider applying but may need to develop additional skills."
-    elif final_score >= 20:
-        description = f"⚠️ Weak match. You have {len(matched_skills)} out of {len(job_skills)} required skills.\n\n📋 Job Requirements: {', '.join(job_skills)}\n\n🎯 Your matching skills: {', '.join(matched_skills)}\n\nConsider if you're willing to learn the missing skills."
+    # Combine skill score with metadata score
+    final_score = combine_match_scores(skill_score, metadata_score, skill_weight=0.7, metadata_weight=0.3)
+
+    # Generate detailed description with both skill and metadata analysis
+    skill_description = ""
+    if skill_score >= 80:
+        skill_description = f"✅ Excellent skill match! You have {len(matched_skills)} out of {len(job_skills)} required skills."
+    elif skill_score >= 60:
+        skill_description = f"✅ Good skill match! You have {len(matched_skills)} out of {len(job_skills)} required skills."
+    elif skill_score >= 40:
+        skill_description = f"⚠️ Moderate skill match. You have {len(matched_skills)} out of {len(job_skills)} required skills."
+    elif skill_score >= 20:
+        skill_description = f"⚠️ Weak skill match. You have {len(matched_skills)} out of {len(job_skills)} required skills."
     else:
-        description = f"❌ Poor match. You have {len(matched_skills)} out of {len(job_skills)} required skills.\n\n📋 Job Requirements: {', '.join(job_skills)}\n\n🎯 Your matching skills: {', '.join(matched_skills)}\n\nNot recommended for {user_experience} candidates."
+        skill_description = f"❌ Poor skill match. You have {len(matched_skills)} out of {len(job_skills)} required skills."
 
-    # Filter out jobs with very low scores (less than 5)
-    if final_score < 5:
-        return 0, "❌ Very poor match. Not recommended for your skill level."
+    # Combine descriptions
+    combined_description = f"{skill_description}\n\n📋 Job Requirements: {', '.join(job_skills)}\n🎯 Your matching skills: {', '.join(matched_skills)}\n\n📊 Metadata Analysis:\n{metadata_description}\n\n🎯 Final Score: {final_score}/100 (Skills: {skill_score}/100, Metadata: {metadata_score}/100)"
 
-    return final_score, description
+    return final_score, combined_description
 
 def extract_skills_from_text(text):
     """Extract skills from text using keyword matching."""
