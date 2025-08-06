@@ -1,14 +1,23 @@
-from fastapi import FastAPI, Request, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
-from starlette.middleware.sessions import SessionMiddleware
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+from fastapi import FastAPI, Request, File, UploadFile, HTTPException
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.middleware.sessions import SessionMiddleware
+import uvicorn
+import pdfplumber
+import re
+from typing import List, Dict, Any
+from job_scrapers.dispatcher import scrape_all_company_sites
+from matching.matcher import match_job_to_resume
 
 # Import real logic
 from resume_parser.parse_resume import parse_resume
-from job_scrapers.dispatcher import scrape_all_company_sites
-from matching.matcher import match_job_to_resume
 
 # Import authentication
 from auth.oauth import get_google_oauth_client, get_authorization_url, get_user_info
