@@ -10,6 +10,10 @@ from resume_parser.parse_resume import parse_resume
 from job_scrapers.dispatcher import scrape_all_company_sites
 from matching.matcher import match_job_to_resume
 
+# Import authentication
+from auth.oauth import oauth, get_user_info_google, get_user_info_apple
+from auth.session import session_manager
+
 app = FastAPI()
 
 # Add session middleware (required for OAuth)
@@ -75,13 +79,87 @@ def is_valid_resume(text):
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "results": None})
+    """Root endpoint - redirect to login or dashboard based on auth status"""
+    if session_manager.is_authenticated(request):
+        return RedirectResponse(url="/dashboard", status_code=302)
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Login page"""
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    """Dashboard - accessible with or without login"""
+    user = session_manager.get_current_user(request)
+    return templates.TemplateResponse("index.html", {
+        "request": request, 
+        "results": None,
+        "user": user
+    })
+
+@app.get("/auth/{provider}")
+async def oauth_login(request: Request, provider: str):
+    """Initiate OAuth login"""
+    if provider not in ["google", "apple"]:
+        raise HTTPException(status_code=400, detail="Invalid provider")
+    
+    client = getattr(oauth, provider)
+    redirect_uri = request.url_for('oauth_callback', provider=provider)
+    return await client.authorize_redirect(request, redirect_uri)
+
+@app.get("/auth/{provider}/callback")
+async def oauth_callback(request: Request, provider: str):
+    """Handle OAuth callback"""
+    if provider not in ["google", "apple"]:
+        raise HTTPException(status_code=400, detail="Invalid provider")
+    
+    try:
+        client = getattr(oauth, provider)
+        token = await client.authorize_access_token(request)
+        
+        # Get user info based on provider
+        if provider == "google":
+            user_info = await get_user_info_google(token)
+        elif provider == "apple":
+            user_info = await get_user_info_apple(token)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid provider")
+        
+        if not user_info:
+            return RedirectResponse(url="/login?error=auth_failed", status_code=302)
+        
+        # Create session
+        session_id = session_manager.create_session(user_info)
+        
+        # Store session in browser
+        response = RedirectResponse(url="/dashboard", status_code=302)
+        request.session['session_id'] = session_id
+        
+        return response
+        
+    except Exception as e:
+        print(f"OAuth error: {e}")
+        return RedirectResponse(url="/login?error=auth_failed", status_code=302)
+
+@app.get("/logout")
+async def logout(request: Request):
+    """Logout user"""
+    session_id = request.session.get('session_id')
+    if session_id:
+        session_manager.delete_session(session_id)
+        request.session.clear()
+    
+    return RedirectResponse(url="/login", status_code=302)
 
 @app.post("/match", response_class=HTMLResponse)
 async def match_resume(request: Request, resume: UploadFile = File(...)):
     """
     Accepts a resume upload and returns matching internships with detailed analysis.
     """
+    user = session_manager.get_current_user(request)
+    
     # Validate file type
     allowed_extensions = ['.pdf', '.png', '.jpg', '.jpeg']
     file_extension = os.path.splitext(resume.filename)[1].lower()
@@ -90,7 +168,8 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         return templates.TemplateResponse("index.html", {
             "request": request,
             "results": None,
-            "error": "Please upload a valid file (PDF, PNG, JPG, or JPEG)."
+            "error": "Please upload a valid file (PDF, PNG, JPG, or JPEG).",
+            "user": user
         })
     
     # Save uploaded file
@@ -111,7 +190,8 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
             return templates.TemplateResponse("index.html", {
                 "request": request,
                 "results": None,
-                "error": "A valid resume wasn't uploaded. Please try again with a proper resume file."
+                "error": "A valid resume wasn't uploaded. Please try again with a proper resume file.",
+                "user": user
             })
         
         print("🔍 Extracted resume skills:", resume_skills)
@@ -121,7 +201,8 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
             return templates.TemplateResponse("index.html", {
                 "request": request,
                 "results": None,
-                "error": "No skills were detected in your resume. Please make sure your resume includes technical skills, programming languages, or relevant experience."
+                "error": "No skills were detected in your resume. Please make sure your resume includes technical skills, programming languages, or relevant experience.",
+                "user": user
             })
         
     except Exception as e:
@@ -129,7 +210,8 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         return templates.TemplateResponse("index.html", {
             "request": request,
             "results": None,
-            "error": "Error processing your resume. Please make sure the file is not corrupted and try again."
+            "error": "Error processing your resume. Please make sure the file is not corrupted and try again.",
+            "user": user
         })
     
     # Scrape internships from multiple sources
@@ -142,7 +224,8 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         return templates.TemplateResponse("index.html", {
             "request": request,
             "results": [],
-            "error": "Unable to fetch internship opportunities at the moment. Please try again later."
+            "error": "Unable to fetch internship opportunities at the moment. Please try again later.",
+            "user": user
         })
     
     print("🔍 Sample job data:")
@@ -170,5 +253,6 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
     print(f"✅ Final matched jobs: {len(matched_jobs)}")
     return templates.TemplateResponse("index.html", {
         "request": request,
-        "results": matched_jobs
+        "results": matched_jobs,
+        "user": user
     })

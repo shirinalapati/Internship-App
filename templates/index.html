@@ -1,522 +1,533 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Internship Matcher</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Internship Matcher</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
-      color: #1a202c;
-      line-height: 1.6;
-    }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
 
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 2rem;
-    }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 1rem 2rem;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
 
-    .header {
-      text-align: center;
-      margin-bottom: 3rem;
-      color: white;
-    }
+        .logo {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: white;
+        }
 
-    .header h1 {
-      font-size: 3rem;
-      font-weight: 700;
-      margin-bottom: 1rem;
-      text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            color: white;
+        }
 
-    .header p {
-      font-size: 1.2rem;
-      opacity: 0.9;
-      font-weight: 300;
-    }
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
 
-    .upload-section {
-      background: white;
-      border-radius: 20px;
-      padding: 3rem;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-      margin-bottom: 3rem;
-      text-align: center;
-    }
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
 
-    .upload-area {
-      border: 3px dashed #e2e8f0;
-      border-radius: 15px;
-      padding: 3rem 2rem;
-      margin: 2rem 0;
-      transition: all 0.3s ease;
-      cursor: pointer;
-    }
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+            color: white;
+        }
 
-    .upload-area:hover {
-      border-color: #667eea;
-      background-color: #f7fafc;
-    }
+        .login-btn {
+            background: rgba(255,255,255,0.9);
+            color: #667eea;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
 
-    .upload-icon {
-      font-size: 3rem;
-      color: #667eea;
-      margin-bottom: 1rem;
-    }
+        .login-btn:hover {
+            background: white;
+            color: #667eea;
+        }
 
-    .file-input {
-      display: none;
-    }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
 
-    .upload-text {
-      font-size: 1.1rem;
-      color: #4a5568;
-      margin-bottom: 1rem;
-    }
+        .upload-section {
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 3rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
 
-    .upload-subtext {
-      font-size: 0.9rem;
-      color: #718096;
-    }
+        h1 {
+            text-align: center;
+            color: #333;
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
 
-    .upload-btn {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border: none;
-      padding: 1rem 2rem;
-      border-radius: 10px;
-      font-size: 1.1rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      margin-top: 1rem;
-    }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 1.2rem;
+            margin-bottom: 3rem;
+            line-height: 1.6;
+        }
 
-    .upload-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
-    }
+        .upload-form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2rem;
+        }
 
-    .error-message {
-      background: linear-gradient(135deg, #fed7d7, #feb2b2);
-      border: 1px solid #fc8181;
-      border-radius: 10px;
-      padding: 1.5rem;
-      margin: 2rem 0;
-      color: #c53030;
-      text-align: center;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            padding: 1.5rem 3rem;
+            color: white;
+            font-weight: 600;
+            font-size: 1.1rem;
+            box-shadow: 0 10px 30px rgba(102,126,234,0.3);
+        }
 
-    .error-message i {
-      font-size: 1.5rem;
-      margin-bottom: 0.5rem;
-      display: block;
-    }
+        .file-input-wrapper:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 15px 40px rgba(102,126,234,0.4);
+        }
 
-    .error-message h3 {
-      font-size: 1.2rem;
-      font-weight: 600;
-      margin-bottom: 0.5rem;
-    }
+        .file-input {
+            position: absolute;
+            left: -9999px;
+        }
 
-    .error-message p {
-      font-size: 1rem;
-      opacity: 0.9;
-    }
+        .upload-btn {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+            border: none;
+            padding: 1rem 2.5rem;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 25px rgba(40,167,69,0.3);
+        }
 
-    .results-section {
-      background: white;
-      border-radius: 20px;
-      padding: 2rem;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-    }
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 35px rgba(40,167,69,0.4);
+        }
 
-    .results-header {
-      text-align: center;
-      margin-bottom: 2rem;
-    }
+        .upload-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
 
-    .results-header h2 {
-      font-size: 2rem;
-      font-weight: 700;
-      color: #1a202c;
-      margin-bottom: 0.5rem;
-    }
+        .file-info {
+            color: #666;
+            font-size: 0.9rem;
+            text-align: center;
+            margin-top: 1rem;
+        }
 
-    .job-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-      gap: 2rem;
-    }
+        .error-message {
+            background: linear-gradient(135deg, #fed7d7, #feb2b2);
+            border: 1px solid #fc8181;
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            color: #c53030;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
 
-    .job-card {
-      background: #f8fafc;
-      border-radius: 15px;
-      padding: 2rem;
-      border: 1px solid #e2e8f0;
-      transition: all 0.3s ease;
-      position: relative;
-      overflow: hidden;
-    }
+        .error-message i {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
 
-    .job-card:hover {
-      transform: translateY(-5px);
-      box-shadow: 0 15px 30px rgba(0,0,0,0.1);
-    }
+        .error-message h3 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
 
-    .job-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 4px;
-      background: linear-gradient(90deg, #667eea, #764ba2);
-    }
+        .error-message p {
+            font-size: 1rem;
+            opacity: 0.9;
+        }
 
-    .job-header {
-      margin-bottom: 1.5rem;
-    }
+        .results-section {
+            background: rgba(255,255,255,0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
 
-    .job-title {
-      font-size: 1.3rem;
-      font-weight: 600;
-      color: #1a202c;
-      margin-bottom: 0.5rem;
-      line-height: 1.4;
-    }
+        .results-title {
+            color: #333;
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+            font-weight: 600;
+        }
 
-    .job-company {
-      font-size: 1rem;
-      color: #4a5568;
-      font-weight: 500;
-      margin-bottom: 0.5rem;
-    }
+        .job-card {
+            background: white;
+            border-radius: 15px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.08);
+            border: 1px solid #e1e5e9;
+            transition: all 0.3s ease;
+        }
 
-    .job-location {
-      font-size: 0.9rem;
-      color: #718096;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
+        .job-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.12);
+        }
 
-    .score-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      padding: 0.5rem 1rem;
-      border-radius: 25px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      margin-bottom: 1rem;
-    }
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1rem;
+        }
 
-    .score-high {
-      background: linear-gradient(135deg, #48bb78, #38a169);
-      color: white;
-    }
+        .job-title {
+            color: #333;
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
 
-    .score-medium {
-      background: linear-gradient(135deg, #ed8936, #dd6b20);
-      color: white;
-    }
+        .job-company {
+            color: #667eea;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
 
-    .score-low {
-      background: linear-gradient(135deg, #f56565, #e53e3e);
-      color: white;
-    }
+        .job-location {
+            color: #666;
+            font-size: 0.9rem;
+        }
 
-    .metadata-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 1rem;
-      margin: 1.5rem 0;
-      padding: 1rem;
-      background: white;
-      border-radius: 10px;
-      border: 1px solid #e2e8f0;
-    }
+        .match-score {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 1.1rem;
+            min-width: 120px;
+            text-align: center;
+        }
 
-    .metadata-item {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-    }
+        .match-score.excellent {
+            background: linear-gradient(135deg, #28a745, #20c997);
+        }
 
-    .metadata-label {
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: #718096;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
+        .match-score.good {
+            background: linear-gradient(135deg, #fd7e14, #ffc107);
+        }
 
-    .metadata-value {
-      font-size: 0.9rem;
-      font-weight: 500;
-      color: #2d3748;
-    }
+        .match-score.moderate {
+            background: linear-gradient(135deg, #17a2b8, #6f42c1);
+        }
 
-    .sponsorship-yes { color: #38a169; }
-    .sponsorship-no { color: #e53e3e; }
-    .location-remote { color: #3182ce; }
-    .location-hybrid { color: #d69e2e; }
-    .location-onsite { color: #718096; }
+        .match-score.weak {
+            background: linear-gradient(135deg, #6c757d, #495057);
+        }
 
-    .job-description {
-      background: white;
-      padding: 1.5rem;
-      border-radius: 10px;
-      margin: 1.5rem 0;
-      border-left: 4px solid #667eea;
-      font-size: 0.95rem;
-      line-height: 1.6;
-      color: #4a5568;
-    }
+        .job-description {
+            color: #666;
+            line-height: 1.6;
+            margin: 1rem 0;
+        }
 
-    .match-description {
-      background: linear-gradient(135deg, #f7fafc, #edf2f7);
-      padding: 1.5rem;
-      border-radius: 10px;
-      margin: 1.5rem 0;
-      border: 1px solid #e2e8f0;
-      white-space: pre-line;
-      font-size: 0.9rem;
-      line-height: 1.6;
-      color: #2d3748;
-    }
+        .match-analysis {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+        }
 
-    .job-requirements {
-      background: #f7fafc;
-      border: 1px solid #e2e8f0;
-      padding: 1.5rem;
-      margin: 1.5rem 0;
-      border-radius: 10px;
-      white-space: pre-line;
-      font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
-      font-size: 0.85rem;
-      line-height: 1.5;
-      color: #2d3748;
-    }
+        .match-analysis h4 {
+            color: #333;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
 
-    .apply-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      color: white;
-      text-decoration: none;
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      transition: all 0.3s ease;
-      margin-top: 1rem;
-    }
+        .match-details {
+            color: #666;
+            line-height: 1.6;
+        }
 
-    .apply-btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
-    }
+        .apply-btn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 0.75rem 2rem;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 500;
+            display: inline-block;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+        }
 
-    .no-results {
-      text-align: center;
-      padding: 3rem;
-      color: #718096;
-    }
+        .apply-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102,126,234,0.3);
+            color: white;
+        }
 
-    .no-results i {
-      font-size: 3rem;
-      margin-bottom: 1rem;
-      color: #cbd5e0;
-    }
+        .loading {
+            display: none;
+            text-align: center;
+            color: #667eea;
+            font-size: 1.1rem;
+            margin: 2rem 0;
+        }
 
-    .loading {
-      text-align: center;
-      padding: 3rem;
-      color: #718096;
-    }
+        .loading.show {
+            display: block;
+        }
 
-    .loading i {
-      font-size: 2rem;
-      animation: spin 1s linear infinite;
-      margin-bottom: 1rem;
-    }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
 
-    @keyframes spin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
-    }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
 
-    @media (max-width: 768px) {
-      .container {
-        padding: 1rem;
-      }
-      
-      .header h1 {
-        font-size: 2rem;
-      }
-      
-      .job-grid {
-        grid-template-columns: 1fr;
-      }
-      
-      .metadata-grid {
-        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-      }
-    }
-  </style>
+        @media (max-width: 768px) {
+            .container {
+                padding: 0 1rem;
+            }
+
+            .upload-section {
+                padding: 2rem 1.5rem;
+            }
+
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .subtitle {
+                font-size: 1rem;
+            }
+
+            .job-header {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .match-score {
+                align-self: flex-start;
+                min-width: auto;
+            }
+
+            .header {
+                flex-direction: column;
+                gap: 1rem;
+                text-align: center;
+            }
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <h1><i class="fas fa-rocket"></i> AI Internship Matcher</h1>
-      <p>Upload your resume and discover the perfect internship opportunities</p>
-    </div>
-
-    <div class="upload-section">
-      <h2><i class="fas fa-upload"></i> Upload Your Resume</h2>
-      <p>Get matched with the best US internships based on your skills and experience</p>
-      
-      <form action="/match" method="post" enctype="multipart/form-data">
-        <div class="upload-area" onclick="document.getElementById('file-input').click()">
-          <div class="upload-icon">
-            <i class="fas fa-file-upload"></i>
-          </div>
-          <div class="upload-text">Click to upload your resume</div>
-          <div class="upload-subtext">Supports PDF, PNG, JPG, JPEG files</div>
-          <input type="file" id="file-input" name="resume" accept=".pdf,.png,.jpg,.jpeg" required style="display: none;">
+    <div class="container">
+        <div class="header">
+            <div class="logo">🎯 Internship Matcher</div>
+            <div class="user-info">
+                {% if user %}
+                    <div class="user-avatar">{{ user.name[0].upper() if user.name else user.email[0].upper() }}</div>
+                    <div>
+                        <div>{{ user.name or user.email }}</div>
+                        <div style="font-size: 0.8rem; opacity: 0.8;">{{ user.provider.title() }}</div>
+                    </div>
+                    <a href="/logout" class="logout-btn">
+                        <i class="fas fa-sign-out-alt"></i> Logout
+                    </a>
+                {% else %}
+                    <a href="/login" class="login-btn">
+                        <i class="fas fa-sign-in-alt"></i> Sign In
+                    </a>
+                {% endif %}
+            </div>
         </div>
-        <button type="submit" class="upload-btn">
-          <i class="fas fa-search"></i> Find Matching Internships
-        </button>
-      </form>
-    </div>
 
-    {% if error %}
-      <div class="error-message">
-        <i class="fas fa-exclamation-triangle"></i>
-        <h3>Upload Error</h3>
-        <p>{{ error }}</p>
-      </div>
-    {% endif %}
-
-    {% if results is not none %}
-      <div class="results-section">
-        <div class="results-header">
-          <h2><i class="fas fa-briefcase"></i> Matching US Internships</h2>
-          <p>Found {{ results|length }} opportunities for you</p>
+        <div class="upload-section">
+            <h1>🚀 Find Your Perfect Internship</h1>
+            <p class="subtitle">Upload your resume and let AI match you with the best internship opportunities</p>
+            
+            <form class="upload-form" action="/match" method="post" enctype="multipart/form-data" id="uploadForm">
+                <label for="resume" class="file-input-wrapper">
+                    <input type="file" id="resume" name="resume" class="file-input" accept=".pdf,.png,.jpg,.jpeg" required>
+                    <i class="fas fa-upload"></i> Choose Resume File
+                </label>
+                
+                <button type="submit" class="upload-btn" id="submitBtn">
+                    <i class="fas fa-search"></i> Find Matches
+                </button>
+                
+                <div class="file-info">
+                    <p>Supported formats: PDF, PNG, JPG, JPEG</p>
+                    <p>Maximum file size: 10MB</p>
+                </div>
+            </form>
         </div>
-        
-        {% if results|length == 0 %}
-          <div class="no-results">
-            <i class="fas fa-search"></i>
-            <h3>No matching internships found</h3>
-            <p>Try uploading a different resume or check back later for new opportunities</p>
-          </div>
-        {% else %}
-          <div class="job-grid">
-            {% for job in results %}
-              <div class="job-card">
-                <div class="job-header">
-                  <div class="score-badge {% if job['score'] >= 60 %}score-high{% elif job['score'] >= 40 %}score-medium{% else %}score-low{% endif %}">
-                    <i class="fas fa-star"></i>
-                    {{ job['score'] }}% Match
-                  </div>
-                  <h3 class="job-title">{{ job['title'] }}</h3>
-                  <div class="job-company">{{ job['company'] }}</div>
-                  <div class="job-location">
-                    <i class="fas fa-map-marker-alt"></i>
-                    {{ job['location'] }}
-                  </div>
-                </div>
-                
-                {% if job.get('metadata') %}
-                  <div class="metadata-grid">
-                    <div class="metadata-item">
-                      <span class="metadata-label">Job Type</span>
-                      <span class="metadata-value">{{ job['metadata']['job_type'] }}</span>
-                    </div>
-                    <div class="metadata-item">
-                      <span class="metadata-label">Experience</span>
-                      <span class="metadata-value">{{ job['metadata']['experience_level'] }}</span>
-                    </div>
-                    <div class="metadata-item">
-                      <span class="metadata-label">Location</span>
-                      <span class="metadata-value location-{{ job['metadata']['location_type'].lower().replace('-', '') }}">{{ job['metadata']['location_type'] }}</span>
-                    </div>
-                    <div class="metadata-item">
-                      <span class="metadata-label">Sponsorship</span>
-                      <span class="metadata-value {% if 'No' in job['metadata']['sponsorship'] %}sponsorship-no{% else %}sponsorship-yes{% endif %}">{{ job['metadata']['sponsorship'] }}</span>
-                    </div>
-                    {% if job['metadata']['deadline'] %}
-                      <div class="metadata-item">
-                        <span class="metadata-label">Posted</span>
-                        <span class="metadata-value">{{ job['metadata']['deadline'] }}</span>
-                      </div>
-                    {% endif %}
-                  </div>
-                {% endif %}
-                
-                <div class="job-description">
-                  <strong><i class="fas fa-info-circle"></i> About this role:</strong><br>
-                  {{ job['description'] }}
-                </div>
-                
-                {% if job.get('job_requirements') and job['job_requirements'] != "Requirements not available" %}
-                  <div class="job-requirements">
-                    <strong><i class="fas fa-list-check"></i> Detailed Requirements:</strong><br>
-                    {{ job['job_requirements'] }}
-                  </div>
-                {% endif %}
-                
-                {% if job.get('match_description') %}
-                  <div class="match-description">
-                    <strong><i class="fas fa-chart-line"></i> Match Analysis:</strong><br>
-                    {{ job['match_description'] }}
-                  </div>
-                {% endif %}
-                
-                <a href="{{ job['apply_link'] }}" target="_blank" class="apply-btn">
-                  <i class="fas fa-external-link-alt"></i> Apply Now
-                </a>
-              </div>
-            {% endfor %}
-          </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Analyzing your resume and finding the best matches...</p>
+            <p><small>This may take up to 30 seconds</small></p>
+        </div>
+
+        {% if error %}
+            <div class="error-message">
+                <i class="fas fa-exclamation-triangle"></i>
+                <h3>Upload Error</h3>
+                <p>{{ error }}</p>
+            </div>
         {% endif %}
-      </div>
-    {% endif %}
-  </div>
 
-  <script>
-    // File input handling
-    document.getElementById('file-input').addEventListener('change', function(e) {
-      const file = e.target.files[0];
-      if (file) {
-        const uploadText = document.querySelector('.upload-text');
-        uploadText.textContent = `Selected: ${file.name}`;
-        uploadText.style.color = '#667eea';
-        uploadText.style.fontWeight = '600';
-      }
-    });
+        {% if results is not none %}
+            <div class="results-section">
+                <h2 class="results-title">
+                    <i class="fas fa-bullseye"></i> 
+                    {% if results|length > 0 %}
+                        Found {{ results|length }} Matching Opportunities
+                    {% else %}
+                        No Matches Found
+                    {% endif %}
+                </h2>
+                
+                {% if results|length == 0 %}
+                    <div class="error-message">
+                        <i class="fas fa-search"></i>
+                        <h3>No Matching Internships</h3>
+                        <p>We couldn't find any internships that match your skills. Try updating your resume with more technical skills or check back later for new opportunities.</p>
+                    </div>
+                {% endif %}
 
-    // Upload area click handling
-    document.querySelector('.upload-area').addEventListener('click', function() {
-      document.getElementById('file-input').click();
-    });
-  </script>
+                {% for job in results %}
+                    <div class="job-card">
+                        <div class="job-header">
+                            <div>
+                                <h3 class="job-title">{{ job.title }}</h3>
+                                <div class="job-company">{{ job.company }}</div>
+                                <div class="job-location">
+                                    <i class="fas fa-map-marker-alt"></i> {{ job.location }}
+                                </div>
+                            </div>
+                            <div class="match-score {% if job.score >= 80 %}excellent{% elif job.score >= 60 %}good{% elif job.score >= 40 %}moderate{% else %}weak{% endif %}">
+                                {{ job.score }}% Match
+                            </div>
+                        </div>
+                        
+                        {% if job.description %}
+                            <div class="job-description">
+                                {{ job.description }}
+                            </div>
+                        {% endif %}
+                        
+                        <div class="match-analysis">
+                            <h4><i class="fas fa-chart-line"></i> Match Analysis</h4>
+                            <div class="match-details">{{ job.match_description|safe }}</div>
+                        </div>
+                        
+                        {% if job.apply_link %}
+                            <a href="{{ job.apply_link }}" target="_blank" class="apply-btn">
+                                <i class="fas fa-external-link-alt"></i> Apply Now
+                            </a>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', function() {
+            document.getElementById('loading').classList.add('show');
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('submitBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+        });
+
+        document.getElementById('resume').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const fileInput = document.querySelector('.file-input-wrapper');
+                fileInput.innerHTML = `<i class="fas fa-file"></i> ${file.name}`;
+            }
+        });
+    </script>
 </body>
 </html>
