@@ -1,65 +1,70 @@
-from authlib.integrations.starlette_client import OAuth
-from fastapi import Request
 import os
-from dotenv import load_dotenv
+from authlib.integrations.httpx_client import AsyncOAuth2Client
+from authlib.oauth2.rfc6749 import OAuth2Token
 
-load_dotenv()
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
 
 # OAuth configuration
-oauth = OAuth()
+GOOGLE_OAUTH_CONFIG = {
+    "client_id": GOOGLE_CLIENT_ID,
+    "client_secret": GOOGLE_CLIENT_SECRET,
+    "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+    "token_endpoint": "https://oauth2.googleapis.com/token",
+    "userinfo_endpoint": "https://openidconnect.googleapis.com/v1/userinfo",
+    "scopes": ["openid", "email", "profile"]
+}
 
-# Google OAuth
-oauth.register(
-    name='google',
-    client_id=os.getenv('GOOGLE_CLIENT_ID'),
-    client_secret=os.getenv('GOOGLE_CLIENT_SECRET'),
-    server_metadata_url='https://accounts.google.com/.well-known/openid_configuration',
-    client_kwargs={
-        'scope': 'openid email profile'
-    }
-)
-
-# Apple OAuth
-oauth.register(
-    name='apple',
-    client_id=os.getenv('APPLE_CLIENT_ID'),
-    client_secret=os.getenv('APPLE_CLIENT_SECRET'),
-    server_metadata_url='https://appleid.apple.com/.well-known/openid_configuration',
-    client_kwargs={
-        'scope': 'name email'
-    }
-)
-
-async def get_user_info_google(token):
-    """Get user info from Google using the access token"""
-    async with oauth.google.client as client:
-        resp = await client.get('userinfo', token=token)
-        user_info = resp.json()
-        return {
-            'id': user_info.get('sub'),
-            'email': user_info.get('email'),
-            'name': user_info.get('name'),
-            'given_name': user_info.get('given_name'),
-            'family_name': user_info.get('family_name'),
-            'picture': user_info.get('picture'),
-            'provider': 'google'
-        }
-
-async def get_user_info_apple(token):
-    """Get user info from Apple using the access token"""
-    # Apple doesn't provide a userinfo endpoint, so we decode the ID token
-    import json
-    from jose import jwt
+async def get_google_oauth_client():
+    """Create and return Google OAuth client"""
+    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        raise ValueError("Google OAuth credentials not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables.")
     
-    # For Apple, the user info is in the ID token
-    id_token = token.get('id_token')
-    if id_token:
-        # Note: In production, you should verify the token signature
-        payload = jwt.get_unverified_claims(id_token)
-        return {
-            'id': payload.get('sub'),
-            'email': payload.get('email'),
-            'name': payload.get('name', payload.get('email', '').split('@')[0]),
-            'provider': 'apple'
-        }
-    return None 
+    return AsyncOAuth2Client(
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        scope=" ".join(GOOGLE_OAUTH_CONFIG["scopes"])
+    )
+
+async def get_authorization_url(client: AsyncOAuth2Client, redirect_uri: str, state: str):
+    """Generate authorization URL for Google OAuth"""
+    authorization_url, _ = client.create_authorization_url(
+        GOOGLE_OAUTH_CONFIG["authorization_endpoint"],
+        redirect_uri=redirect_uri,
+        state=state
+    )
+    return authorization_url
+
+async def exchange_code_for_token(client: AsyncOAuth2Client, code: str, redirect_uri: str):
+    """Exchange authorization code for access token"""
+    try:
+        token = await client.fetch_token(
+            GOOGLE_OAUTH_CONFIG["token_endpoint"],
+            code=code,
+            redirect_uri=redirect_uri
+        )
+        return token
+    except Exception as e:
+        print(f"❌ Error exchanging code for token: {e}")
+        return None
+
+async def get_user_info(token: OAuth2Token):
+    """Get user information from Google using access token"""
+    try:
+        client = AsyncOAuth2Client(
+            client_id=GOOGLE_CLIENT_ID,
+            client_secret=GOOGLE_CLIENT_SECRET,
+            token=token
+        )
+        
+        response = await client.get(GOOGLE_OAUTH_CONFIG["userinfo_endpoint"])
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"❌ Error getting user info: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"❌ Error getting user info: {e}")
+        return None 

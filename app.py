@@ -101,22 +101,99 @@ async def dashboard(request: Request):
 
 @app.get("/auth/{provider}")
 async def oauth_login(request: Request, provider: str):
-    """Initiate OAuth login - temporarily disabled, redirect to dashboard"""
-    if provider not in ["google", "apple"]:
-        raise HTTPException(status_code=400, detail="Invalid provider")
+    """Initiate OAuth login"""
+    if provider != "google":
+        raise HTTPException(status_code=400, detail="Only Google OAuth is supported")
     
-    # Temporarily redirect to dashboard until OAuth is properly configured
-    # TODO: Set up proper OAuth credentials in environment variables
-    return RedirectResponse(url="/dashboard?message=oauth_setup_required", status_code=302)
+    try:
+        from auth.oauth import get_google_oauth_client, get_authorization_url
+        import secrets
+        
+        # Generate state parameter for security
+        state = secrets.token_urlsafe(32)
+        request.session["oauth_state"] = state
+        
+        # Get the redirect URI based on the request
+        if request.url.hostname == "localhost":
+            redirect_uri = "http://localhost:8000/auth/google/callback"
+        else:
+            redirect_uri = f"{request.url.scheme}://{request.url.netloc}/auth/google/callback"
+        
+        # Create OAuth client and get authorization URL
+        client = await get_google_oauth_client()
+        authorization_url = await get_authorization_url(client, redirect_uri, state)
+        
+        return RedirectResponse(url=authorization_url, status_code=302)
+        
+    except ValueError as e:
+        # OAuth not configured properly
+        return RedirectResponse(url="/dashboard?message=oauth_setup_required", status_code=302)
+    except Exception as e:
+        print(f"❌ OAuth error: {e}")
+        raise HTTPException(status_code=500, detail="OAuth configuration error")
 
 @app.get("/auth/{provider}/callback")
-async def oauth_callback(request: Request, provider: str):
-    """Handle OAuth callback - temporarily disabled"""
-    if provider not in ["google", "apple"]:
-        raise HTTPException(status_code=400, detail="Invalid provider")
+async def oauth_callback(request: Request, provider: str, code: str = None, state: str = None, error: str = None):
+    """Handle OAuth callback"""
+    if provider != "google":
+        raise HTTPException(status_code=400, detail="Only Google OAuth is supported")
     
-    # Temporarily redirect to dashboard
-    return RedirectResponse(url="/dashboard?message=oauth_setup_required", status_code=302)
+    # Check for OAuth errors
+    if error:
+        print(f"❌ OAuth error: {error}")
+        return RedirectResponse(url="/login?error=oauth_error", status_code=302)
+    
+    # Verify state parameter
+    stored_state = request.session.get("oauth_state")
+    if not state or state != stored_state:
+        print("❌ Invalid state parameter")
+        return RedirectResponse(url="/login?error=invalid_state", status_code=302)
+    
+    # Clear the state from session
+    request.session.pop("oauth_state", None)
+    
+    if not code:
+        return RedirectResponse(url="/login?error=no_code", status_code=302)
+    
+    try:
+        from auth.oauth import get_google_oauth_client, exchange_code_for_token, get_user_info
+        
+        # Get the redirect URI
+        if request.url.hostname == "localhost":
+            redirect_uri = "http://localhost:8000/auth/google/callback"
+        else:
+            redirect_uri = f"{request.url.scheme}://{request.url.netloc}/auth/google/callback"
+        
+        # Exchange code for token
+        client = await get_google_oauth_client()
+        token = await exchange_code_for_token(client, code, redirect_uri)
+        
+        if not token:
+            return RedirectResponse(url="/login?error=token_exchange_failed", status_code=302)
+        
+        # Get user information
+        user_info = await get_user_info(token)
+        
+        if not user_info:
+            return RedirectResponse(url="/login?error=user_info_failed", status_code=302)
+        
+        # Create user session
+        user = {
+            "id": user_info.get("sub"),
+            "email": user_info.get("email"),
+            "name": user_info.get("name"),
+            "picture": user_info.get("picture"),
+            "provider": "google"
+        }
+        
+        request.session["user"] = user
+        print(f"✅ User logged in successfully: {user['email']}")
+        
+        return RedirectResponse(url="/dashboard", status_code=302)
+        
+    except Exception as e:
+        print(f"❌ OAuth callback error: {e}")
+        return RedirectResponse(url="/login?error=oauth_callback_error", status_code=302)
 
 @app.get("/logout")
 async def logout(request: Request):
