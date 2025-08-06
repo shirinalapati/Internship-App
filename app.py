@@ -125,12 +125,13 @@ async def oauth_login(request: Request, provider: str):
         return RedirectResponse(url=authorization_url, status_code=302)
         
     except ValueError as e:
-        # OAuth not configured - silently redirect to dashboard
-        return RedirectResponse(url="/dashboard", status_code=302)
+        # OAuth not configured - redirect to login with error message
+        print(f"❌ OAuth not configured: {e}")
+        return RedirectResponse(url="/login?error=oauth_not_configured", status_code=302)
     except Exception as e:
         print(f"❌ OAuth error: {e}")
-        # Silently redirect to dashboard instead of showing error
-        return RedirectResponse(url="/dashboard", status_code=302)
+        # Redirect to login with error message
+        return RedirectResponse(url="/login?error=oauth_error", status_code=302)
 
 @app.get("/auth/{provider}/callback")
 async def oauth_callback(request: Request, provider: str, code: str = None, state: str = None, error: str = None):

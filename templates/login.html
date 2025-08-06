@@ -195,7 +195,9 @@
 
         {% if error %}
             <div class="error-message">
-                {% if error == "oauth_error" %}
+                {% if error == "oauth_not_configured" %}
+                    <p>❌ Google OAuth is not configured yet. Please use "Continue without signing in" for now.</p>
+                {% elif error == "oauth_error" %}
                     <p>❌ OAuth authentication failed. Please try again.</p>
                 {% elif error == "invalid_state" %}
                     <p>❌ Security validation failed. Please try again.</p>
