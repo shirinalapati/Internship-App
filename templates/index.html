@@ -108,6 +108,34 @@
       box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
     }
 
+    .error-message {
+      background: linear-gradient(135deg, #fed7d7, #feb2b2);
+      border: 1px solid #fc8181;
+      border-radius: 10px;
+      padding: 1.5rem;
+      margin: 2rem 0;
+      color: #c53030;
+      text-align: center;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+
+    .error-message i {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+      display: block;
+    }
+
+    .error-message h3 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .error-message p {
+      font-size: 1rem;
+      opacity: 0.9;
+    }
+
     .results-section {
       background: white;
       border-radius: 20px;
@@ -377,6 +405,14 @@
         </button>
       </form>
     </div>
+
+    {% if error %}
+      <div class="error-message">
+        <i class="fas fa-exclamation-triangle"></i>
+        <h3>Upload Error</h3>
+        <p>{{ error }}</p>
+      </div>
+    {% endif %}
 
     {% if results is not none %}
       <div class="results-section">
