@@ -1,0 +1,1230 @@
+#!/usr/bin/env python3
+
+import requests
+import re
+from bs4 import BeautifulSoup
+import time
+
+GITHUB_INTERNSHIPS_URL = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md"
+
+def scrape_job_details_from_apply_link(apply_link):
+    """
+    Follow the apply link and extract real job qualifications from the company's job posting page.
+    """
+    try:
+        print(f"🔍 Following apply link: {apply_link}")
+        
+        # Add headers to mimic a real browser
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+        }
+        
+        response = requests.get(apply_link, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Extract job description and qualifications
+        job_text = soup.get_text(separator=' ', strip=True).lower()
+        
+        # Check if we have manual requirements for this job
+        manual_requirements = get_manual_requirements(apply_link)
+        if manual_requirements:
+            print(f"✅ Using manual requirements for {apply_link}")
+            return {
+                'description': manual_requirements['description'],
+                'required_skills': manual_requirements['skills'],
+                'job_requirements': manual_requirements['requirements'],
+                'source': 'manual_database'
+            }
+        
+        # Extract detailed job requirements
+        job_requirements = extract_detailed_requirements(soup, job_text)
+        
+        # Extract skills from the job page
+        extracted_skills = extract_skills_from_job_page(job_text)
+        
+        # Create a detailed description from the actual job posting
+        description = extract_job_description(soup)
+        
+        # Add requirements to description if found
+        if job_requirements and job_requirements != "Requirements not available":
+            description += "\n\n📋 Job Requirements:\n" + job_requirements
+        
+        print(f"✅ Extracted {len(extracted_skills)} skills from job posting")
+        return {
+            'description': description,
+            'required_skills': extracted_skills,
+            'job_requirements': job_requirements,
+            'source': 'company_website'
+        }
+        
+    except Exception as e:
+        print(f"⚠️ Could not extract details from {apply_link}: {e}")
+        return None
+
+def get_manual_requirements(apply_link):
+    """
+    Get manual requirements for known jobs that are difficult to scrape.
+    """
+    manual_requirements_db = {
+        # KBR Software Engineer Intern
+        "kbr.wd5.myworkdayjobs.com/en-US/KBR_Careers/job/Sioux-Falls-South-Dakota/Software-Engineer-Intern_R2109933": {
+            "description": "Software Engineering internship at KBR focusing on satellite ground systems and remote sensing data processing. This role involves working with satellite data, machine learning models, and developing software for space systems.",
+            "skills": ["Python", "Machine Learning", "Deep Learning", "IDL", "Matlab", "Satellite Systems", "Remote Sensing", "Image Processing", "Signal Processing"],
+            "requirements": """📌 Experience:
+  • Working toward a degree in software/data science, remote sensing calibration and/or mathematics
+  • Preference will be given to anyone with experience in satellite ground systems, remote sensing data capture, processing, archive, distribution, and scientific applications
+
+📌 Education:
+  • Working toward a Bachelors in Engineering, Signal Processing, System Calibration, Photogrammetry, Geodesy, Mathematics, or Satellite Systems
+
+📌 Required Skills:
+  • Experience in Machine learning and/or deep learning AI models
+  • Programming skills in Python, IDL, or Matlab
+  • Ability to communicate effectively orally and in writing
+  • Ability to think independently
+  • Ability to handle complex multitask environments
+
+📌 Desired Skills:
+  • Knowledge of spacecraft and spacecraft instrument dynamics and characteristics
+  • Knowledge of image/signal processing and statistical analysis fundamentals
+  • Knowledge of map projections
+  • Ability to develop image and signal processing techniques and tools
+  • Knowledge of satellite systems and remote sensing
+  • Knowledge of cloud data processing"""
+        },
+        
+        # Medtronic Software Engineering Intern
+        "medtronic.wd1.myworkdayjobs.com/MedtronicCareers/job/North-Haven-Connecticut-United-States-of-America/Software-Engineering-Intern---Summer-2026_R40546-1": {
+            "description": "Software Engineering internship at Medtronic focusing on medical device software development. This role involves developing software for life-saving medical devices and ensuring compliance with FDA regulations.",
+            "skills": ["Python", "Java", "C++", "Software Engineering", "Medical Devices", "Testing", "Quality Assurance"],
+            "requirements": """📌 Education:
+  • Currently pursuing a Bachelor's or Master's degree in Computer Science, Software Engineering, or related field
+
+📌 Required Skills:
+  • Programming experience in Python, Java, or C++
+  • Understanding of software development lifecycle
+  • Strong problem-solving and analytical skills
+  • Excellent communication and teamwork abilities
+
+📌 Desired Skills:
+  • Experience with medical device software development
+  • Knowledge of FDA regulations and quality systems
+  • Experience with testing and validation processes
+  • Understanding of embedded systems and real-time software"""
+        },
+        
+        # ByteDance Software Development Engineer in Test Intern
+        "jobs.bytedance.com/en/position/7533346574367377672/detail": {
+            "description": "Software Development Engineer in Test (SDET) internship at ByteDance focusing on e-commerce platform testing and automation. This role involves developing automated testing frameworks and ensuring quality for global e-commerce applications.",
+            "skills": ["Python", "Java", "JavaScript", "Selenium", "Testing", "Automation", "E-commerce", "API Testing"],
+            "requirements": """📌 Education:
+  • Currently pursuing a Bachelor's or Master's degree in Computer Science, Software Engineering, or related field
+
+📌 Required Skills:
+  • Programming experience in Python, Java, or JavaScript
+  • Understanding of software testing methodologies
+  • Experience with automated testing frameworks
+  • Knowledge of web technologies and APIs
+
+📌 Desired Skills:
+  • Experience with Selenium or similar testing tools
+  • Knowledge of e-commerce platforms
+  • Understanding of CI/CD pipelines
+  • Experience with performance testing"""
+        },
+        
+        # ByteDance Frontend Software Engineer Intern
+        "jobs.bytedance.com/en/position/7533346008655825159/detail": {
+            "description": "Frontend Software Engineer internship at ByteDance focusing on e-commerce platform development. This role involves building user interfaces and frontend applications for global e-commerce platforms.",
+            "skills": ["JavaScript", "React", "Vue", "HTML", "CSS", "Frontend", "E-commerce", "Web Development"],
+            "requirements": """📌 Education:
+  • Currently pursuing a Bachelor's or Master's degree in Computer Science, Software Engineering, or related field
+
+📌 Required Skills:
+  • Strong JavaScript programming skills
+  • Experience with modern frontend frameworks (React, Vue, Angular)
+  • Knowledge of HTML, CSS, and web technologies
+  • Understanding of responsive design principles
+
+📌 Desired Skills:
+  • Experience with e-commerce platforms
+  • Knowledge of state management (Redux, Vuex)
+  • Understanding of web performance optimization
+  • Experience with TypeScript"""
+        },
+        
+        # ByteDance Backend Software Engineer Intern
+        "jobs.bytedance.com/en/position/7532668388906256658/detail": {
+            "description": "Backend Software Engineer internship at ByteDance focusing on e-commerce platform backend development. This role involves developing server-side applications, APIs, and database systems for global e-commerce platforms.",
+            "skills": ["Python", "Java", "Go", "Backend", "API Development", "Database", "E-commerce", "Microservices"],
+            "requirements": """📌 Education:
+  • Currently pursuing a Bachelor's or Master's degree in Computer Science, Software Engineering, or related field
+
+📌 Required Skills:
+  • Strong programming skills in Python, Java, or Go
+  • Understanding of backend development principles
+  • Knowledge of API development and database design
+  • Experience with server-side technologies
+
+📌 Desired Skills:
+  • Experience with microservices architecture
+  • Knowledge of cloud platforms (AWS, GCP, Azure)
+  • Understanding of distributed systems
+  • Experience with e-commerce backend systems"""
+        },
+        
+        # Chase Software Engineer Program
+        "jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1002/jobs/job/210650080": {
+            "description": "Software Engineer Program internship at JPMorgan Chase focusing on financial technology development. This role involves developing software solutions for banking and financial services.",
+            "skills": ["Java", "Python", "SQL", "Financial Technology", "Banking", "Software Engineering"],
+            "requirements": """📌 Education:
+  • Currently pursuing a Bachelor's or Master's degree in Computer Science, Engineering, or related field
+
+📌 Required Skills:
+  • Programming experience in Java, Python, or similar languages
+  • Understanding of software development principles
+  • Strong analytical and problem-solving skills
+  • Interest in financial technology
+
+📌 Desired Skills:
+  • Knowledge of financial systems and banking
+  • Experience with databases and SQL
+  • Understanding of security principles
+  • Interest in fintech innovation"""
+        },
+        
+        # GDIT Software Developer Associate
+        "gdit.wd5.myworkdayjobs.com/en-US/gdit_earlytalent/job/USA-LA-Bossier-City/Software-Developer-Associate--Intern_": {
+            "description": "Software Developer Associate internship at GDIT focusing on government and defense software development. This role involves developing software solutions for government agencies and defense contractors.",
+            "skills": ["Java", "Python", "C++", "Government", "Defense", "Software Development"],
+            "requirements": """📌 Education:
+  • Currently pursuing a Bachelor's or Master's degree in Computer Science, Software Engineering, or related field
+
+📌 Required Skills:
+  • Programming experience in Java, Python, or C++
+  • Understanding of software development lifecycle
+  • Strong problem-solving abilities
+  • US Citizenship required for some positions
+
+📌 Desired Skills:
+  • Knowledge of government software systems
+  • Understanding of security clearances
+  • Experience with defense industry software
+  • Interest in public sector technology"""
+        },
+        
+        # SEL Software Application Engineer Intern
+        "selinc.wd1.myworkdayjobs.com/en-US/SEL/job/Washington---Pullman/Software-Application-Engineer-Intern_": {
+            "description": "Software Application Engineer internship at SEL focusing on power systems and electrical engineering software. This role involves developing software for power grid management and electrical systems.",
+            "skills": ["C++", "Python", "Electrical Engineering", "Power Systems", "Real-time Systems"],
+            "requirements": """📌 Education:
+  • Currently pursuing a Bachelor's or Master's degree in Computer Science, Electrical Engineering, or related field
+
+📌 Required Skills:
+  • Programming experience in C++ or Python
+  • Understanding of software engineering principles
+  • Interest in power systems and electrical engineering
+  • Strong analytical skills
+
+📌 Desired Skills:
+  • Knowledge of power systems and electrical engineering
+  • Experience with real-time systems
+  • Understanding of industrial software development
+  • Interest in grid technology"""
+        },
+        
+        # Tencent Cloud Media Services Intern
+        "tencent.wd1.myworkdayjobs.com/en-US/Tencent_Careers/job/US-California-Palo-Alto/Cloud-Media-Services-Intern_": {
+            "description": "Cloud Media Services internship at Tencent focusing on cloud computing and media processing. This role involves developing cloud-based solutions for media streaming and processing.",
+            "skills": ["Cloud Computing", "Media Processing", "Python", "Java", "AWS", "Azure"],
+            "requirements": """📌 Education:
+  • Currently pursuing a Bachelor's or Master's degree in Computer Science, Engineering, or related field
+
+📌 Required Skills:
+  • Programming experience in Python, Java, or similar languages
+  • Understanding of cloud computing concepts
+  • Interest in media processing and streaming
+  • Strong technical skills
+
+📌 Desired Skills:
+  • Experience with cloud platforms (AWS, Azure, GCP)
+  • Knowledge of media processing technologies
+  • Understanding of streaming protocols
+  • Interest in video and audio processing"""
+        },
+        
+        # HPR Software Engineering Intern
+        "job-boards.greenhouse.io/hyannisportresearch/jobs/6667961003": {
+            "description": "Software Engineering internship at HPR (Hyannis Port Research) focusing on financial technology and quantitative research. This role involves developing software for high-frequency trading and financial analysis.",
+            "skills": ["Python", "Java", "Go", "R", "Bash", "Shell", "Less", "Ai", "Aws", "Software Engineering", "Programming", "Coding", "Algorithm", "Data Structures", "Linux", "Fintech"],
+            "requirements": """📌 Education:
+  • Currently pursuing a Bachelor's or Master's degree in Computer Science, Engineering, Mathematics, or related field
+
+📌 Required Skills:
+  • Strong programming skills in Python, Java, or C++
+  • Understanding of algorithms and data structures
+  • Knowledge of Linux systems and shell scripting
+  • Interest in financial technology and quantitative analysis
+
+📌 Desired Skills:
+  • Experience with cloud platforms (AWS, GCP)
+  • Knowledge of financial markets and trading
+  • Understanding of high-performance computing
+  • Experience with quantitative analysis tools"""
+        },
+        
+        # Allium Engineering Intern - AI
+        "jobs.ashbyhq.com/allium/5d697ce5-b820-45c0-a101-86a05e1fb15e": {
+            "description": "Engineering Intern - AI at Allium focusing on artificial intelligence and machine learning development. This role involves developing AI-powered software solutions and machine learning models.",
+            "skills": ["Java", "Javascript", "R", "Ai", "Intern", "Engineering", "Machine Learning"],
+            "requirements": """📌 Education:
+  • Currently pursuing a Bachelor's or Master's degree in Computer Science, Engineering, or related field
+
+📌 Required Skills:
+  • Programming experience in Java, JavaScript, or Python
+  • Understanding of machine learning and AI concepts
+  • Strong mathematical and analytical skills
+  • Interest in artificial intelligence
+
+📌 Desired Skills:
+  • Experience with machine learning frameworks
+  • Knowledge of data science and statistics
+  • Understanding of neural networks and deep learning
+  • Experience with AI/ML projects"""
+        }
+    }
+    
+    # Check if we have manual requirements for this URL
+    for url_pattern, requirements in manual_requirements_db.items():
+        if url_pattern in apply_link:
+            return requirements
+    
+    return None
+
+def extract_detailed_requirements(soup, job_text):
+    """
+    Extract detailed job requirements including experience, education, required skills, and desired skills.
+    """
+    requirements = []
+    
+    # Look for common requirement sections
+    requirement_sections = [
+        "experience", "education", "required skills", "desired skills", "qualifications",
+        "requirements", "minimum qualifications", "preferred qualifications", "what you need",
+        "what you'll need", "technical skills", "competencies", "knowledge", "abilities",
+        "essential functions", "job duties", "responsibilities", "background", "prerequisites"
+    ]
+    
+    # Find requirement sections in the HTML
+    for section in requirement_sections:
+        # Look for headings containing these keywords
+        headings = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'strong', 'b', 'span', 'div'])
+        for heading in headings:
+            heading_text = heading.get_text().lower()
+            if section in heading_text:
+                # Get the content following this heading
+                content = []
+                next_elem = heading.find_next_sibling()
+                count = 0
+                while next_elem and next_elem.name not in ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] and count < 10:
+                    if next_elem.name in ['p', 'li', 'div', 'span']:
+                        text = next_elem.get_text(strip=True)
+                        if text and len(text) > 10:  # Only include substantial content
+                            content.append(text)
+                    next_elem = next_elem.find_next_sibling()
+                    count += 1
+                
+                if content:
+                    section_title = heading.get_text().strip()
+                    requirements.append(f"📌 {section_title}:")
+                    # Limit to 3 items per section to avoid repetition
+                    for item in content[:3]:
+                        requirements.append(f"  • {item}")
+                    requirements.append("")
+    
+    # If no structured requirements found, try specific job site patterns
+    if not requirements:
+        requirements = extract_from_specific_sites(soup, job_text)
+    
+    # If still no requirements, extract from general text
+    if not requirements:
+        # Look for bullet points or list items
+        lists = soup.find_all(['ul', 'ol'])
+        for lst in lists:
+            items = lst.find_all('li')
+            if items:
+                for item in items[:5]:  # Limit to 5 items
+                    text = item.get_text(strip=True)
+                    if text and len(text) > 10:
+                        requirements.append(f"  • {text}")
+    
+    # If still no requirements, extract sentences containing key words
+    if not requirements:
+        sentences = job_text.split('.')
+        key_words = ['experience', 'education', 'required', 'desired', 'skills', 'knowledge', 'ability', 'degree', 'background', 'qualification']
+        for sentence in sentences[:5]:  # Limit to 5 sentences
+            if any(word in sentence for word in key_words) and len(sentence) > 20:
+                requirements.append(f"  • {sentence.strip()}")
+    
+    # If still no requirements, look for any text that might be requirements
+    if not requirements:
+        # Look for any text that mentions requirements or qualifications
+        paragraphs = soup.find_all('p')
+        for p in paragraphs[:3]:  # Limit to 3 paragraphs
+            text = p.get_text(strip=True)
+            if text and len(text) > 30 and any(word in text.lower() for word in ['experience', 'education', 'required', 'skills', 'degree', 'background']):
+                requirements.append(f"  • {text}")
+    
+    # Remove duplicates and limit length
+    if requirements:
+        # Remove duplicate lines
+        unique_requirements = []
+        seen = set()
+        for req in requirements:
+            if req not in seen:
+                unique_requirements.append(req)
+                seen.add(req)
+        
+        # Limit total length
+        result = "\n".join(unique_requirements)
+        if len(result) > 800:
+            # Truncate but keep complete sections
+            lines = result.split('\n')
+            truncated = []
+            total_length = 0
+            for line in lines:
+                if total_length + len(line) > 800:
+                    break
+                truncated.append(line)
+                total_length += len(line)
+            result = "\n".join(truncated) + "..."
+        
+        return result
+    
+    return "Requirements not available"
+
+def extract_from_specific_sites(soup, job_text):
+    """
+    Extract requirements from specific job site platforms.
+    """
+    requirements = []
+    
+    # Workday job sites (like KBR, Medtronic, etc.)
+    workday_selectors = [
+        '[data-automation-id="jobDescriptionText"]',
+        '[data-automation-id="jobDescription"]',
+        '.job-description',
+        '.job-description-text',
+        '[data-testid="job-description"]',
+        '.job-details',
+        '.job-content'
+    ]
+    
+    for selector in workday_selectors:
+        elements = soup.select(selector)
+        if elements:
+            text = elements[0].get_text(separator=' ', strip=True)
+            if len(text) > 100:
+                # Extract requirements from the text
+                req_sections = extract_requirements_from_text(text)
+                if req_sections:
+                    requirements.extend(req_sections)
+                break
+    
+    # Greenhouse job sites (like HPR)
+    greenhouse_selectors = [
+        '.job-description',
+        '.job-content',
+        '#job-description',
+        '.description'
+    ]
+    
+    if not requirements:
+        for selector in greenhouse_selectors:
+            elements = soup.select(selector)
+            if elements:
+                text = elements[0].get_text(separator=' ', strip=True)
+                if len(text) > 100:
+                    req_sections = extract_requirements_from_text(text)
+                    if req_sections:
+                        requirements.extend(req_sections)
+                    break
+    
+    # Oracle job sites (like Chase)
+    oracle_selectors = [
+        '.job-description',
+        '.job-content',
+        '.description',
+        '[data-testid="job-description"]'
+    ]
+    
+    if not requirements:
+        for selector in oracle_selectors:
+            elements = soup.select(selector)
+            if elements:
+                text = elements[0].get_text(separator=' ', strip=True)
+                if len(text) > 100:
+                    req_sections = extract_requirements_from_text(text)
+                    if req_sections:
+                        requirements.extend(req_sections)
+                    break
+    
+    # Ashby job sites (like Allium)
+    ashby_selectors = [
+        '.job-description',
+        '.job-content',
+        '.description',
+        '[data-testid="job-description"]'
+    ]
+    
+    if not requirements:
+        for selector in ashby_selectors:
+            elements = soup.select(selector)
+            if elements:
+                text = elements[0].get_text(separator=' ', strip=True)
+                if len(text) > 100:
+                    req_sections = extract_requirements_from_text(text)
+                    if req_sections:
+                        requirements.extend(req_sections)
+                    break
+    
+    return requirements
+
+def extract_requirements_from_text(text):
+    """
+    Extract requirements from job description text.
+    """
+    requirements = []
+    text_lower = text.lower()
+    
+    # Look for requirement sections
+    sections = [
+        ("experience", ["experience", "work experience", "professional experience"]),
+        ("education", ["education", "degree", "bachelor", "master", "phd", "academic"]),
+        ("required skills", ["required skills", "required qualifications", "minimum qualifications", "requirements"]),
+        ("desired skills", ["desired skills", "preferred qualifications", "nice to have", "bonus"]),
+        ("technical skills", ["technical skills", "programming", "software", "technology"]),
+        ("responsibilities", ["responsibilities", "duties", "job duties", "role"])
+    ]
+    
+    for section_name, keywords in sections:
+        for keyword in keywords:
+            if keyword in text_lower:
+                # Find the section content
+                start_idx = text_lower.find(keyword)
+                if start_idx != -1:
+                    # Get text after the keyword
+                    section_text = text[start_idx:start_idx + 500]  # Get 500 chars after keyword
+                    
+                    # Split into sentences and find relevant ones
+                    sentences = section_text.split('.')
+                    relevant_sentences = []
+                    
+                    for sentence in sentences[:5]:  # Limit to 5 sentences
+                        sentence = sentence.strip()
+                        if len(sentence) > 20 and any(word in sentence.lower() for word in ['experience', 'education', 'required', 'skills', 'degree', 'background', 'knowledge', 'ability']):
+                            relevant_sentences.append(sentence)
+                    
+                    if relevant_sentences:
+                        requirements.append(f"📌 {section_name.title()}:")
+                        for sentence in relevant_sentences:
+                            requirements.append(f"  • {sentence}")
+                        requirements.append("")
+                        break
+    
+    return requirements
+
+def extract_skills_from_job_page(job_text):
+    """
+    Extract technical skills from the actual job posting text.
+    """
+    # Enhanced skill keywords for job page extraction
+    skill_keywords = [
+        # Programming Languages
+        "python", "java", "javascript", "typescript", "c++", "c#", "go", "rust", "kotlin", "swift",
+        "php", "ruby", "scala", "r", "matlab", "perl", "bash", "shell", "powershell",
+        
+        # Web Technologies
+        "react", "angular", "vue", "node.js", "express", "django", "flask", "spring", "laravel",
+        "html", "css", "sass", "less", "bootstrap", "tailwind", "jquery", "ajax", "rest api",
+        "graphql", "websocket", "http", "https", "json", "xml",
+        
+        # Databases & Data
+        "sql", "mysql", "postgresql", "mongodb", "redis", "elasticsearch", "cassandra",
+        "data analysis", "data science", "data engineering", "etl", "data pipeline",
+        "machine learning", "deep learning", "ai", "artificial intelligence", "neural networks",
+        "tensorflow", "pytorch", "scikit-learn", "pandas", "numpy", "matplotlib", "seaborn",
+        "computer vision", "nlp", "natural language processing", "recommendation systems",
+        
+        # Cloud & DevOps
+        "aws", "azure", "gcp", "google cloud", "docker", "kubernetes", "jenkins", "gitlab",
+        "github", "git", "ci/cd", "terraform", "ansible", "prometheus", "grafana",
+        
+        # Software Engineering
+        "software engineering", "software development", "programming", "coding", "algorithm",
+        "data structures", "object-oriented", "functional programming", "design patterns",
+        "microservices", "api development", "backend", "frontend", "full stack", "fullstack",
+        "mobile development", "ios", "android", "react native", "flutter", "xamarin",
+        
+        # Testing & Quality
+        "testing", "unit testing", "integration testing", "qa", "quality assurance",
+        "test automation", "selenium", "junit", "pytest", "jest", "cypress",
+        
+        # Tools & Frameworks
+        "maven", "gradle", "npm", "yarn", "webpack", "babel", "eslint", "prettier",
+        "intellij", "vscode", "eclipse", "vim", "emacs", "linux", "unix", "macos",
+        
+        # Domain Knowledge
+        "e-commerce", "fintech", "healthcare", "cybersecurity", "blockchain", "iot",
+        "embedded systems", "fpga", "hardware", "robotics", "autonomous vehicles",
+        
+        # Soft Skills
+        "leadership", "communication", "teamwork", "problem solving", "agile", "scrum",
+        "project management", "mentoring", "collaboration", "presentation",
+        
+        # Academic/Student Terms
+        "student", "intern", "internship", "co-op", "research", "thesis", "academic",
+        "university", "college", "bachelor", "master", "phd", "graduate", "undergraduate",
+        "computer science", "engineering", "mathematics", "statistics", "physics"
+    ]
+    
+    found_skills = []
+    for skill in skill_keywords:
+        if skill in job_text:
+            found_skills.append(skill.title())
+    
+    return found_skills
+
+def extract_job_description(soup):
+    """
+    Extract a clean, concise job description from the job posting page.
+    """
+    try:
+        # Look for common job description containers
+        description_selectors = [
+            '[data-automation-id="jobDescriptionText"]',
+            '[data-automation-id="jobDescription"]',
+            '.job-description',
+            '.job-description-text',
+            '[data-testid="job-description"]',
+            '.job-details',
+            '.job-content',
+            '.description',
+            '#job-description',
+            '.job-summary',
+            '.role-description',
+            '.job-info',
+            '.position-description',
+            '.job-overview'
+        ]
+        
+        description_text = ""
+        
+        # Try to find description in specific containers
+        for selector in description_selectors:
+            element = soup.select_one(selector)
+            if element:
+                text = element.get_text(separator=' ', strip=True)
+                if len(text) > 50:  # Ensure we have meaningful content
+                    description_text = text
+                    break
+        
+        # If no specific container found, try to extract from body
+        if not description_text:
+            body = soup.find('body')
+            if body:
+                # Get all text and filter out navigation/UI elements
+                all_text = body.get_text(separator=' ', strip=True)
+                
+                # Split into sentences and filter
+                sentences = []
+                for sentence in all_text.split('.'):
+                    sentence = sentence.strip()
+                    if len(sentence) > 20:  # Only meaningful sentences
+                        # Filter out UI/navigation text
+                        skip_words = [
+                            'menu', 'dashboard', 'log in', 'sign up', 'share', 'apply', 
+                            'job requirements', 'requirements:', 'qualifications:', 'skills:', 
+                            'about this role', 'about this role:', '📋 job requirements:',
+                            'job requirements:', 'get referrals', 'simplify\'s take', 'what believers are saying',
+                            'what critics are saying', 'significant headcount growth', 'want to apply to',
+                            'you have', 'ways to', 'get a', 'referral', 'from your', 'network',
+                            'open menu', 'matches', 'jobs', 'job tracker', 'documents', 'profile',
+                            'back', 'work here?', 'claim your company', 'website', 'open user menu',
+                            'overview', 'reviews', 'interviews', 'about', 'simplify\'s rating',
+                            'why', 'rated', 'competitive edge', 'growth potential', 'differentiation',
+                            'industries', 'company stage', 'overview', 'get s', 'simplify\'s take',
+                            'what believers are saying', 'what critics are saying', 'integration with',
+                            'expansion of', 'digital fixed-income trading', 'meets growing advisor demand',
+                            'for diverse products', 'data privacy concerns', 'sensitive client information'
+                        ]
+                        should_skip = any(word in sentence.lower() for word in skip_words)
+                        
+                        if not should_skip:
+                            sentences.append(sentence)
+                
+                # Take first 8 sentences maximum
+                if sentences:
+                    description_text = '. '.join(sentences[:8])
+        
+        # If still no description, use the page title and any available text
+        if not description_text:
+            title = soup.find('title')
+            if title:
+                description_text = title.get_text(strip=True)
+            
+            # Add any available text from the page
+            body_text = soup.find('body')
+            if body_text:
+                text = body_text.get_text(separator=' ', strip=True)
+                if len(text) > 100:
+                    # Take the first 800 characters as a fallback
+                    description_text = text[:800]
+        
+        # Clean and limit the description
+        if description_text:
+            # Remove excessive whitespace
+            description_text = ' '.join(description_text.split())
+            
+            # Remove unwanted phrases and text - comprehensive list
+            phrases_to_remove = [
+                'job requirements',
+                'requirements:',
+                'qualifications:',
+                'skills:',
+                'about this role',
+                'about this role:',
+                '📋 job requirements:',
+                '📋 job requirements',
+                'job requirements:',
+                'headquarters',
+                'founded',
+                'company size',
+                'total funding',
+                'get referrals',
+                'simplify\'s take',
+                'what believers are saying',
+                'what critics are saying',
+                'significant headcount growth',
+                'want to apply to',
+                'you have',
+                'ways to',
+                'get a',
+                'referral',
+                'from your',
+                'network',
+                'open menu',
+                'dashboard',
+                'matches',
+                'jobs',
+                'job tracker',
+                'documents',
+                'profile',
+                'log in',
+                'back',
+                'work here?',
+                'claim your company',
+                'website',
+                'open user menu',
+                'share',
+                'overview',
+                'reviews',
+                'interviews',
+                'about',
+                'simplify\'s rating',
+                'why',
+                'rated',
+                'competitive edge',
+                'growth potential',
+                'differentiation',
+                'industries',
+                'company stage',
+                'overview',
+                'get s',
+                'simplify\'s take',
+                'what believers are saying',
+                'what critics are saying',
+                'integration with',
+                'expansion of',
+                'digital fixed-income trading',
+                'meets growing advisor demand',
+                'for diverse products',
+                'data privacy concerns',
+                'sensitive client information',
+                'altruist\'s $152m funding round',
+                'indicates strong investor confidence',
+                'and growth potential',
+                'integration with thyme',
+                'enhances ai capabilities',
+                'improving client interactions',
+                'for rias',
+                'expansion of digital',
+                'fixed-income trading',
+                'meets growing advisor',
+                'demand for diverse',
+                'products',
+                'what critics are saying',
+                'integration of ai',
+                'capabilities may raise',
+                'data privacy concerns',
+                'for sensitive client',
+                'information'
+            ]
+            
+            for phrase in phrases_to_remove:
+                description_text = description_text.replace(phrase, '').replace(phrase.upper(), '')
+            
+            # Clean up any remaining artifacts
+            description_text = description_text.replace('  ', ' ')
+            description_text = description_text.strip()
+            
+            # Remove any remaining "About this role:" text - more aggressive filtering
+            role_phrases = [
+                'about this role:',
+                'about this role',
+                'about the role:',
+                'about the role',
+                'role description:',
+                'role description',
+                'position description:',
+                'position description'
+            ]
+            
+            # First, remove from the beginning
+            for phrase in role_phrases:
+                if description_text.lower().startswith(phrase):
+                    description_text = description_text[len(phrase):].strip()
+                    break
+            
+            # Then remove from anywhere in the text (case insensitive)
+            for phrase in role_phrases:
+                description_text = description_text.replace(phrase, '').replace(phrase.title(), '').replace(phrase.upper(), '')
+            
+            # Also remove any remaining "About this role:" that might have been missed
+            if 'about this role:' in description_text.lower():
+                description_text = description_text.lower().replace('about this role:', '').strip()
+                # Capitalize first letter
+                if description_text:
+                    description_text = description_text[0].upper() + description_text[1:]
+            
+            # Remove "📋 Job Requirements:" and similar phrases from anywhere in the text
+            requirements_phrases = [
+                '📋 job requirements:',
+                '📋 job requirements',
+                'job requirements:',
+                'job requirements',
+                'requirements:',
+                'requirements',
+                'qualifications:',
+                'qualifications',
+                'skills:',
+                'skills'
+            ]
+            
+            for phrase in requirements_phrases:
+                # Remove from anywhere in the text
+                description_text = description_text.replace(phrase, '').replace(phrase.title(), '').replace(phrase.upper(), '')
+                # Also remove with emoji variations
+                description_text = description_text.replace('📋 ' + phrase, '').replace('📋 ' + phrase.title(), '').replace('📋 ' + phrase.upper(), '')
+            
+            # Remove any text that ends with "..." and replace with clean period
+            if description_text.endswith('...'):
+                description_text = description_text[:-3] + '.'
+            elif not description_text.endswith('.'):
+                description_text += '.'
+            
+            # Clean up any double periods or excessive whitespace
+            description_text = description_text.replace('..', '.').replace('  ', ' ').strip()
+            
+            # Limit to reasonable length
+            if len(description_text) > 800:
+                # Find the last complete sentence within 800 characters
+                truncated = description_text[:800]
+                last_period = truncated.rfind('.')
+                if last_period > 600:  # Only if we have a reasonable sentence
+                    description_text = truncated[:last_period + 1]
+                else:
+                    description_text = truncated + '.'
+            
+            # Add "About this company:" prefix if not already present
+            if not description_text.lower().startswith('about this company'):
+                description_text = f"About this company: {description_text}"
+            
+            return description_text
+        
+        # Fallback description
+        return "About this company: Software Engineering internship position. Please click 'Apply Here' for detailed information."
+        
+    except Exception as e:
+        print(f"⚠️ Error extracting job description: {e}")
+        return "About this company: Software Engineering internship position. Please click 'Apply Here' for detailed information."
+
+def scrape_github_internships(keyword="intern", max_results=20):
+    """
+    Scrape internship listings from the Summer 2026 Tech Internships GitHub repository.
+    This is much more reliable than scraping individual company career sites.
+    """
+    print("🔍 [GitHub Internships] Scraping from Summer 2026 Tech Internships repository...")
+    
+    try:
+        # Get the raw markdown content from GitHub
+        response = requests.get(GITHUB_INTERNSHIPS_URL)
+        response.raise_for_status()
+        
+        # Parse the markdown content directly
+        markdown_content = response.text
+        
+        # Parse the markdown table structure
+        jobs = parse_internship_table(markdown_content, max_results)
+        
+        print(f"✅ [GitHub Internships] Found {len(jobs)} internship opportunities")
+        return jobs
+        
+    except Exception as e:
+        print(f"❌ [GitHub Internships] Error scraping: {e}")
+        return []
+
+def extract_skills_from_job(job):
+    """
+    Extract skills from job title and description.
+    """
+    text = f"{job['title']} {job['description']}".lower()
+    
+    # Enhanced skill keywords with more technical terms
+    skill_keywords = [
+        # Programming Languages
+        "python", "java", "javascript", "typescript", "c++", "c#", "go", "rust", "kotlin", "swift",
+        "php", "ruby", "scala", "r", "matlab", "perl", "bash", "shell", "powershell",
+        
+        # Web Technologies
+        "react", "angular", "vue", "node.js", "express", "django", "flask", "spring", "laravel",
+        "html", "css", "sass", "less", "bootstrap", "tailwind", "jquery", "ajax", "rest api",
+        "graphql", "websocket", "http", "https", "json", "xml",
+        
+        # Databases & Data
+        "sql", "mysql", "postgresql", "mongodb", "redis", "elasticsearch", "cassandra",
+        "data analysis", "data science", "data engineering", "etl", "data pipeline",
+        "machine learning", "deep learning", "ai", "artificial intelligence", "neural networks",
+        "tensorflow", "pytorch", "scikit-learn", "pandas", "numpy", "matplotlib", "seaborn",
+        "computer vision", "nlp", "natural language processing", "recommendation systems",
+        
+        # Cloud & DevOps
+        "aws", "azure", "gcp", "google cloud", "docker", "kubernetes", "jenkins", "gitlab",
+        "github", "git", "ci/cd", "terraform", "ansible", "prometheus", "grafana",
+        
+        # Software Engineering
+        "software engineering", "software development", "programming", "coding", "algorithm",
+        "data structures", "object-oriented", "functional programming", "design patterns",
+        "microservices", "api development", "backend", "frontend", "full stack", "fullstack",
+        "mobile development", "ios", "android", "react native", "flutter", "xamarin",
+        
+        # Testing & Quality
+        "testing", "unit testing", "integration testing", "qa", "quality assurance",
+        "test automation", "selenium", "junit", "pytest", "jest", "cypress",
+        
+        # Tools & Frameworks
+        "maven", "gradle", "npm", "yarn", "webpack", "babel", "eslint", "prettier",
+        "intellij", "vscode", "eclipse", "vim", "emacs", "linux", "unix", "macos",
+        
+        # Domain Knowledge
+        "e-commerce", "fintech", "healthcare", "cybersecurity", "blockchain", "iot",
+        "embedded systems", "fpga", "hardware", "robotics", "autonomous vehicles",
+        
+        # Soft Skills
+        "leadership", "communication", "teamwork", "problem solving", "agile", "scrum",
+        "project management", "mentoring", "collaboration", "presentation",
+        
+        # Academic/Student Terms
+        "student", "intern", "internship", "co-op", "research", "thesis", "academic",
+        "university", "college", "bachelor", "master", "phd", "graduate", "undergraduate",
+        "computer science", "engineering", "mathematics", "statistics", "physics"
+    ]
+    
+    found_skills = []
+    for skill in skill_keywords:
+        if skill in text:
+            found_skills.append(skill.title())
+    
+    return found_skills
+
+def extract_job_metadata(job_title, location, age, apply_link):
+    """
+    Extract metadata from job information.
+    """
+    metadata = {
+        "job_type": "Internship",
+        "experience_level": "Entry-level",
+        "location_type": "On-site",
+        "deadline": None,
+        "sponsorship": "Unknown",
+        "salary_range": None,
+        "application_age": age
+    }
+    
+    # Determine job type
+    title_lower = job_title.lower()
+    if "co-op" in title_lower or "coop" in title_lower:
+        metadata["job_type"] = "Co-op"
+    elif "intern" in title_lower:
+        metadata["job_type"] = "Internship"
+    elif "program" in title_lower:
+        metadata["job_type"] = "Program"
+    elif "associate" in title_lower:
+        metadata["job_type"] = "Associate"
+    
+    # Determine experience level
+    if any(word in title_lower for word in ["senior", "lead", "principal", "staff"]):
+        metadata["experience_level"] = "Senior"
+    elif any(word in title_lower for word in ["junior", "entry", "associate"]):
+        metadata["experience_level"] = "Entry-level"
+    else:
+        metadata["experience_level"] = "Entry-level"  # Default for internships
+    
+    # Determine location type
+    location_lower = location.lower()
+    if "remote" in location_lower:
+        metadata["location_type"] = "Remote"
+    elif "hybrid" in location_lower:
+        metadata["location_type"] = "Hybrid"
+    elif "on-site" in location_lower or "onsite" in location_lower:
+        metadata["location_type"] = "On-site"
+    else:
+        metadata["location_type"] = "On-site"  # Default
+    
+    # Determine sponsorship status
+    if "🛂" in job_title:
+        metadata["sponsorship"] = "No Sponsorship"
+    elif "🇺🇸" in job_title:
+        metadata["sponsorship"] = "US Citizenship Required"
+    else:
+        metadata["sponsorship"] = "Unknown"
+    
+    # Parse age for deadline estimation
+    if age and age != "Unknown":
+        try:
+            if "d" in age:
+                days = int(age.replace("d", ""))
+                metadata["deadline"] = f"Posted {days} days ago"
+            elif "mo" in age:
+                months = int(age.replace("mo", ""))
+                metadata["deadline"] = f"Posted {months} months ago"
+            elif "w" in age:
+                weeks = int(age.replace("w", ""))
+                metadata["deadline"] = f"Posted {weeks} weeks ago"
+        except:
+            metadata["deadline"] = age
+    
+    return metadata
+
+def parse_internship_table(content, max_results):
+    jobs = []
+    lines = content.split('\n')
+    in_software_section = False
+    last_valid_company = "Unknown"  # Track the last valid company name
+    
+    print(f"🔍 [GitHub] Parsing {len(lines)} lines...")
+    
+    for i, line in enumerate(lines):
+        line = line.strip()
+        
+        if "💻 Software Engineering" in line:
+            in_software_section = True
+            print("✅ [GitHub] Found Software Engineering section")
+            continue
+        
+        if (line.startswith('🤖') or line.startswith('📈') or line.startswith('🔧')) and in_software_section:
+            print("🛑 [GitHub] Reached end of Software Engineering section")
+            break
+        
+        if not in_software_section:
+            continue
+        
+        # Parse job entries
+        if '|' in line and '[' in line and '](' in line:
+            parts = line.split('|')
+            if len(parts) >= 4:
+                # Extract company name (handle "↳" symbol)
+                company_part = parts[1].strip()
+                if company_part == "↳":
+                    company = last_valid_company
+                else:
+                    # Clean up company name (remove markdown links)
+                    company = company_part.replace('**', '').replace('[', '').replace(']', '')
+                    if '(' in company and ')' in company:
+                        company = company.split('(')[0].strip()
+                    last_valid_company = company
+                
+                # Extract role/title
+                role_part = parts[2].strip()
+                role = role_part.replace('**', '').replace('[', '').replace(']', '')
+                if '(' in role and ')' in role:
+                    role = role.split('(')[0].strip()
+                
+                # Extract location and clean up HTML tags
+                location_part = parts[3].strip()
+                location = location_part.replace('</br>', ', ').replace('<br>', ', ').replace('<br/>', ', ')
+                location = location.replace('**', '').replace('[', '').replace(']', '')
+                
+                # Extract apply link
+                apply_link = ""
+                if '](' in line:
+                    link_start = line.find('](') + 2
+                    link_end = line.find(')', link_start)
+                    if link_end > link_start:
+                        apply_link = line[link_start:link_end]
+                
+                # Extract age (if present)
+                age = ""
+                if len(parts) > 4:
+                    age_part = parts[4].strip()
+                    age = age_part.replace('**', '').replace('[', '').replace(']', '')
+                
+                if apply_link and role and company:
+                    print(f"✅ [GitHub] Added job: {role} at {company}")
+                    
+                    # Get job details from apply link
+                    job_details = scrape_job_details_from_apply_link(apply_link)
+                    
+                    # Create description and skills
+                    if job_details:
+                        description = job_details['description']
+                        required_skills = job_details['required_skills']
+                        print(f"✅ [GitHub] Got real qualifications from {company}")
+                    else:
+                        # Generate detailed description based on company and role
+                        description = generate_detailed_description(company, role, location)
+                        
+                        # Extract skills from the job title and description
+                        required_skills = extract_skills_from_job({
+                            "title": role,
+                            "description": description
+                        })
+                    
+                    # Ensure we always have a description
+                    if not description or description.strip() == "":
+                        description = f"Software Engineering internship at {company}. Role: {role}. Location: {location}. This role involves general software engineering with programming, algorithms, and data structures. This position is suitable for students and recent graduates with strong programming skills and a passion for technology."
+                    
+                    # Extract metadata
+                    metadata = extract_job_metadata(role, location, age, apply_link)
+                    
+                    job = {
+                        "title": role,
+                        "company": company,
+                        "location": location,
+                        "apply_link": apply_link,
+                        "description": description,
+                        "required_skills": required_skills,
+                        "metadata": metadata
+                    }
+                    
+                    # Add job requirements if available
+                    if job_details and 'job_requirements' in job_details:
+                        job['job_requirements'] = job_details['job_requirements']
+                    
+                    jobs.append(job)
+                    
+                    if len(jobs) >= max_results:
+                        break
+    
+    print(f"📋 [GitHub] Total jobs parsed: {len(jobs)}")
+    return jobs
+
+def generate_detailed_description(company, role, location):
+    """
+    Generate a detailed description based on company and role.
+    """
+    role_lower = role.lower()
+    company_lower = company.lower()
+    
+    # Base description
+    description = f"Software Engineering internship at {company}. Role: {role}. Location: {location}. "
+    
+    # Add company-specific context
+    if "bytedance" in company_lower or "tiktok" in company_lower:
+        description += "ByteDance is a global technology company known for TikTok and other popular apps. "
+        if "frontend" in role_lower:
+            description += "This role focuses on frontend development for e-commerce platforms and user-facing applications. "
+        elif "test" in role_lower or "sdet" in role_lower:
+            description += "This role focuses on quality assurance and automated testing for large-scale applications. "
+        else:
+            description += "This role involves developing software for global e-commerce and social media platforms. "
+    
+    elif "chase" in company_lower or "jpmorgan" in company_lower:
+        description += "JPMorgan Chase is a leading global financial services firm. "
+        description += "This role involves developing software solutions for banking, financial services, and fintech applications. "
+        description += "You'll work on systems that handle millions of transactions and serve millions of customers. "
+    
+    elif "medtronic" in company_lower:
+        description += "Medtronic is a global leader in medical technology. "
+        description += "This role involves developing software for life-saving medical devices and healthcare systems. "
+        description += "You'll work on software that directly impacts patient care and medical outcomes. "
+    
+    elif "kbr" in company_lower:
+        description += "KBR is a global technology company specializing in defense, space, and technology solutions. "
+        description += "This role involves working with satellite systems, remote sensing data, and space technology. "
+        description += "You'll develop software for space missions and satellite ground systems. "
+    
+    elif "gdit" in company_lower:
+        description += "GDIT is a technology company serving government and defense sectors. "
+        description += "This role involves developing software solutions for government agencies and defense contractors. "
+        description += "You'll work on systems that support national security and public sector technology. "
+    
+    elif "sel" in company_lower or "schweitzer" in company_lower:
+        description += "SEL is a leader in power systems and electrical engineering technology. "
+        description += "This role involves developing software for power grid management and electrical systems. "
+        description += "You'll work on software that ensures reliable power delivery and grid stability. "
+    
+    elif "tencent" in company_lower:
+        description += "Tencent is a global technology company known for gaming, social media, and cloud services. "
+        if "cloud" in role_lower or "media" in role_lower:
+            description += "This role focuses on cloud computing and media processing technologies. "
+            description += "You'll work on cloud-based solutions for media streaming and processing. "
+        else:
+            description += "This role involves developing software for gaming, social media, and cloud platforms. "
+    
+    elif "allium" in company_lower:
+        description += "Allium is a technology company focusing on AI and machine learning applications. "
+        description += "This role involves developing AI-powered software solutions and machine learning models. "
+        description += "You'll work on cutting-edge artificial intelligence and data science projects. "
+    
+    else:
+        # Generic description based on role keywords
+        if "frontend" in role_lower:
+            description += "This role focuses on frontend development with modern web technologies. "
+            description += "You'll build user interfaces and client-side applications using React, JavaScript, HTML, and CSS. "
+        elif "backend" in role_lower or "api" in role_lower:
+            description += "This role focuses on backend development and API development. "
+            description += "You'll work with databases, server-side logic, and building scalable backend systems. "
+        elif "full stack" in role_lower or "fullstack" in role_lower:
+            description += "This role involves full stack development covering both frontend and backend technologies. "
+            description += "You'll work on complete web applications from database to user interface. "
+        elif "test" in role_lower or "qa" in role_lower:
+            description += "This role focuses on software testing and quality assurance. "
+            description += "You'll develop automated testing frameworks and ensure software quality. "
+        elif "ai" in role_lower or "machine learning" in role_lower:
+            description += "This role involves artificial intelligence and machine learning development. "
+            description += "You'll work on AI models, data processing, and intelligent software systems. "
+        elif "data" in role_lower:
+            description += "This role focuses on data engineering and analysis. "
+            description += "You'll work with data pipelines, databases, and data processing systems. "
+        else:
+            description += "This role involves general software engineering with programming, algorithms, and data structures. "
+    
+    description += "This position is suitable for students and recent graduates with strong programming skills and a passion for technology."
+    
+    return description
+
+# Test the scraper
+if __name__ == "__main__":
+    jobs = scrape_github_internships("intern", max_results=10)
+    print(f"\nFound {len(jobs)} jobs:")
+    for i, job in enumerate(jobs):
+        print(f"{i+1}. {job['title']} at {job['company']} - {job['location']}")
+        print(f"   Skills: {job['required_skills']}") 

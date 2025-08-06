@@ -5,7 +5,7 @@ from email_sender.generate_email import generate_email
 
 
 def main():
-    resume = parse_resume("data/resume.pdf")
+    resume = parse_resume("data/Murali Resume.png")
     resume_skills = resume["skills"]
     print("✅ Parsed Resume Skills:", resume_skills)
 
@@ -17,10 +17,9 @@ def main():
         print(f"- {job['title']} at {job['company']} ({job['location']})")
         print(f"  Match Score: {score}%")
         print(f"  Link: {job['apply_link']}\n")
-        email = generate_email(job, resume_skills, applicant_name="Shirin")
-        print("📩 Email Preview:")
-        print(email)
+        # Removed email preview generation and print
         print("-" * 40)
 
 if __name__ == "__main__":
-    main()
+    main() 
+    
