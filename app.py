@@ -11,7 +11,7 @@ from job_scrapers.dispatcher import scrape_all_company_sites
 from matching.matcher import match_job_to_resume
 
 # Import authentication
-from auth.oauth import oauth, get_user_info_google, get_user_info_apple
+from auth.oauth import get_google_oauth_client, get_authorization_url, get_user_info
 from auth.session import session_manager
 
 app = FastAPI()
@@ -106,7 +106,6 @@ async def oauth_login(request: Request, provider: str):
         raise HTTPException(status_code=400, detail="Only Google OAuth is supported")
     
     try:
-        from auth.oauth import get_google_oauth_client, get_authorization_url
         import secrets
         
         # Generate state parameter for security
