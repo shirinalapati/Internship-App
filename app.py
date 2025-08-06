@@ -101,47 +101,22 @@ async def dashboard(request: Request):
 
 @app.get("/auth/{provider}")
 async def oauth_login(request: Request, provider: str):
-    """Initiate OAuth login"""
+    """Initiate OAuth login - temporarily disabled, redirect to dashboard"""
     if provider not in ["google", "apple"]:
         raise HTTPException(status_code=400, detail="Invalid provider")
     
-    client = getattr(oauth, provider)
-    redirect_uri = request.url_for('oauth_callback', provider=provider)
-    return await client.authorize_redirect(request, redirect_uri)
+    # Temporarily redirect to dashboard until OAuth is properly configured
+    # TODO: Set up proper OAuth credentials in environment variables
+    return RedirectResponse(url="/dashboard?message=oauth_setup_required", status_code=302)
 
 @app.get("/auth/{provider}/callback")
 async def oauth_callback(request: Request, provider: str):
-    """Handle OAuth callback"""
+    """Handle OAuth callback - temporarily disabled"""
     if provider not in ["google", "apple"]:
         raise HTTPException(status_code=400, detail="Invalid provider")
     
-    try:
-        client = getattr(oauth, provider)
-        token = await client.authorize_access_token(request)
-        
-        # Get user info based on provider
-        if provider == "google":
-            user_info = await get_user_info_google(token)
-        elif provider == "apple":
-            user_info = await get_user_info_apple(token)
-        else:
-            raise HTTPException(status_code=400, detail="Invalid provider")
-        
-        if not user_info:
-            return RedirectResponse(url="/login?error=auth_failed", status_code=302)
-        
-        # Create session
-        session_id = session_manager.create_session(user_info)
-        
-        # Store session in browser
-        response = RedirectResponse(url="/dashboard", status_code=302)
-        request.session['session_id'] = session_id
-        
-        return response
-        
-    except Exception as e:
-        print(f"OAuth error: {e}")
-        return RedirectResponse(url="/login?error=auth_failed", status_code=302)
+    # Temporarily redirect to dashboard
+    return RedirectResponse(url="/dashboard?message=oauth_setup_required", status_code=302)
 
 @app.get("/logout")
 async def logout(request: Request):

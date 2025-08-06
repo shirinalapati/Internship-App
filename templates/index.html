@@ -212,6 +212,34 @@
             opacity: 0.9;
         }
 
+        .info-message {
+            background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+            border: 1px solid #42a5f5;
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+            color: #1565c0;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .info-message i {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+
+        .info-message h3 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .info-message p {
+            font-size: 1rem;
+            opacity: 0.9;
+        }
+
         .results-section {
             background: rgba(255,255,255,0.95);
             backdrop-filter: blur(10px);
@@ -422,6 +450,14 @@
                 {% endif %}
             </div>
         </div>
+
+        {% if request.query_params.get('message') == 'oauth_setup_required' %}
+            <div class="info-message">
+                <i class="fas fa-info-circle"></i>
+                <h3>OAuth Setup Required</h3>
+                <p>Google and Apple login are currently being configured. Please use "Continue without signing in" for now, or contact the administrator to set up OAuth credentials.</p>
+            </div>
+        {% endif %}
 
         <div class="upload-section">
             <h1>🚀 Find Your Perfect Internship</h1>
