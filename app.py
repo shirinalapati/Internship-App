@@ -102,7 +102,7 @@ async def login_page(request: Request):
 async def dashboard(request: Request):
     """Dashboard - accessible with or without login"""
     user = session_manager.get_current_user(request)
-    return templates.TemplateResponse("index.html", {
+    return templates.TemplateResponse("dashboard.html", {
         "request": request, 
         "results": None,
         "user": user
@@ -121,11 +121,13 @@ async def oauth_login(request: Request, provider: str):
         state = secrets.token_urlsafe(32)
         request.session["oauth_state"] = state
         
-        # Get the redirect URI based on the request
-        if request.url.hostname == "localhost":
-            redirect_uri = "http://localhost:8000/auth/google/callback"
-        else:
-            redirect_uri = f"{request.url.scheme}://{request.url.netloc}/auth/google/callback"
+        # Get the redirect URI from environment variable or fallback to dynamic generation
+        redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
+        if not redirect_uri:
+            if request.url.hostname == "localhost":
+                redirect_uri = "http://localhost:8000/auth/google/callback"
+            else:
+                redirect_uri = f"{request.url.scheme}://{request.url.netloc}/auth/google/callback"
         
         # Create OAuth client and get authorization URL
         client = await get_google_oauth_client()
@@ -169,10 +171,12 @@ async def oauth_callback(request: Request, provider: str, code: str = None, stat
         from auth.oauth import get_google_oauth_client, exchange_code_for_token, get_user_info
         
         # Get the redirect URI
-        if request.url.hostname == "localhost":
-            redirect_uri = "http://localhost:8000/auth/google/callback"
-        else:
-            redirect_uri = f"{request.url.scheme}://{request.url.netloc}/auth/google/callback"
+        redirect_uri = os.getenv("GOOGLE_REDIRECT_URI")
+        if not redirect_uri:
+            if request.url.hostname == "localhost":
+                redirect_uri = "http://localhost:8000/auth/google/callback"
+            else:
+                redirect_uri = f"{request.url.scheme}://{request.url.netloc}/auth/google/callback"
         
         # Exchange code for token
         client = await get_google_oauth_client()
@@ -245,7 +249,7 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
     file_extension = os.path.splitext(resume.filename)[1].lower()
     
     if file_extension not in allowed_extensions:
-        return templates.TemplateResponse("index.html", {
+        return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "results": None,
             "error": "Please upload a valid file (PDF, PNG, JPG, or JPEG).",
@@ -267,7 +271,7 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         
         # Validate that this is actually a resume
         if not is_valid_resume(resume_text):
-            return templates.TemplateResponse("index.html", {
+            return templates.TemplateResponse("dashboard.html", {
                 "request": request,
                 "results": None,
                 "error": "A valid resume wasn't uploaded. Please try again with a proper resume file.",
@@ -301,7 +305,7 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         
         # Check if any skills were extracted
         if not resume_skills:
-            return templates.TemplateResponse("index.html", {
+            return templates.TemplateResponse("dashboard.html", {
                 "request": request,
                 "results": None,
                 "error": "No skills were detected in your resume. Please make sure your resume includes technical skills, programming languages, or relevant experience.",
@@ -310,7 +314,7 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         
     except Exception as e:
         print(f"❌ Error parsing resume: {e}")
-        return templates.TemplateResponse("index.html", {
+        return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "results": None,
             "error": "Error processing your resume. Please make sure the file is not corrupted and try again.",
@@ -324,10 +328,10 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
     
     if len(jobs) == 0:
         print("❌ No jobs were scraped - this is the problem!")
-        return templates.TemplateResponse("index.html", {
+        return templates.TemplateResponse("dashboard.html", {
             "request": request,
             "results": [],
-            "error": "Unable to fetch internship opportunities at the moment. Please try again later.",
+            "error": "Unable to fetch internship opportunities at this moment. Please try again later.",
             "user": user
         })
     
@@ -374,7 +378,7 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
                     print(f"⚠️ Could not store job match metadata: {e}")
 
     print(f"✅ Final matched jobs: {len(matched_jobs)}")
-    return templates.TemplateResponse("index.html", {
+    return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "results": matched_jobs,
         "user": user
