@@ -19,62 +19,6 @@
             padding: 20px;
         }
 
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 1rem 2rem;
-            margin-bottom: 2rem;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            color: white;
-        }
-
-        .user-avatar {
-            width: 40px;
-            height: 40px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-right: 1rem;
-            font-size: 1.2rem;
-        }
-
-        .user-details h3 {
-            font-size: 1.1rem;
-            margin-bottom: 0.2rem;
-        }
-
-        .user-details p {
-            font-size: 0.9rem;
-            opacity: 0.8;
-        }
-
-        .logout-btn {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            text-decoration: none;
-            font-size: 0.9rem;
-            transition: all 0.3s ease;
-        }
-
-        .logout-btn:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
-        }
-
         .container {
             max-width: 800px;
             margin: 0 auto;
@@ -99,10 +43,8 @@
         }
 
         .header-section p {
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             opacity: 0.9;
-            max-width: 600px;
-            margin: 0 auto;
             line-height: 1.6;
         }
 
@@ -113,54 +55,49 @@
 
         .upload-section h2 {
             color: #333;
-            font-size: 1.8rem;
+            font-size: 2rem;
             margin-bottom: 1rem;
             font-weight: 600;
         }
 
         .upload-section p {
             color: #666;
-            margin-bottom: 2rem;
             font-size: 1.1rem;
-            line-height: 1.6;
+            margin-bottom: 2rem;
         }
 
         .upload-form {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 1.5rem;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 2rem;
+            border: 2px dashed #dee2e6;
+            transition: all 0.3s ease;
+        }
+
+        .upload-form:hover {
+            border-color: #667eea;
+            background: #f0f2ff;
         }
 
         .file-input-wrapper {
             position: relative;
-            overflow: hidden;
-            display: inline-block;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            border-radius: 15px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            padding: 1.5rem 3rem;
-            color: white;
-            font-weight: 600;
-            font-size: 1.1rem;
-            box-shadow: 0 10px 30px rgba(102,126,234,0.3);
-        }
-
-        .file-input-wrapper:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 15px 40px rgba(102,126,234,0.4);
+            margin-bottom: 1.5rem;
         }
 
         .file-input {
-            position: absolute;
-            left: -9999px;
+            width: 100%;
+            padding: 1rem;
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            font-size: 1rem;
+            background: white;
+            transition: all 0.3s ease;
         }
 
-        .file-info {
-            margin-top: 1rem;
-            color: #666;
-            font-size: 0.9rem;
+        .file-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
 
         .submit-button {
@@ -174,35 +111,31 @@
             cursor: pointer;
             transition: all 0.3s ease;
             box-shadow: 0 4px 15px rgba(102,126,234,0.3);
-            opacity: 0.6;
-            pointer-events: none;
         }
 
-        .submit-button.active {
-            opacity: 1;
-            pointer-events: auto;
-        }
-
-        .submit-button.active:hover {
+        .submit-button:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(102,126,234,0.4);
         }
 
+        .submit-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .error-message {
-            background: linear-gradient(135deg, #fed7d7, #feb2b2);
-            border: 1px solid #fc8181;
+            background: #fee;
+            border: 1px solid #fcc;
             border-radius: 10px;
             padding: 1.5rem;
             margin: 2rem 0;
-            color: #c53030;
-            text-align: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            color: #c33;
+            text-align: left;
         }
 
         .error-message i {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-            display: block;
+            margin-right: 0.5rem;
         }
 
         .error-message h3 {
@@ -254,7 +187,7 @@
 
         .job-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: flex-start;
             margin-bottom: 1rem;
         }
@@ -362,12 +295,6 @@
         }
 
         @media (max-width: 768px) {
-            .header {
-                flex-direction: column;
-                gap: 1rem;
-                text-align: center;
-            }
-
             .container {
                 margin: 1rem;
                 border-radius: 15px;
@@ -402,27 +329,6 @@
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="user-info">
-            <div class="user-avatar">
-                {% if user.provider == 'google' %}
-                    <i class="fab fa-google"></i>
-                {% elif user.provider == 'apple' %}
-                    <i class="fab fa-apple"></i>
-                {% else %}
-                    <i class="fas fa-user"></i>
-                {% endif %}
-            </div>
-            <div class="user-details">
-                <h3>{{ user.name or 'User' }}</h3>
-                <p>{{ user.email }}</p>
-            </div>
-        </div>
-        <a href="/logout" class="logout-btn">
-            <i class="fas fa-sign-out-alt"></i> Logout
-        </a>
-    </div>
-
     <div class="container">
         <div class="header-section">
             <h1>🚀 Find Your Perfect Internship</h1>
@@ -434,19 +340,12 @@
             <p>Supported formats: PDF, PNG, JPG, JPEG</p>
             
             <form method="post" action="/match" enctype="multipart/form-data" class="upload-form" id="uploadForm">
-                <label for="resume" class="file-input-wrapper">
-                    <input type="file" id="resume" name="resume" class="file-input" accept=".pdf,.png,.jpg,.jpeg" required>
-                    <i class="fas fa-upload"></i> Choose Resume File
-                </label>
-                
+                <div class="file-input-wrapper">
+                    <input type="file" name="resume" accept=".pdf,.png,.jpg,.jpeg" required class="file-input" id="resumeFile">
+                </div>
                 <button type="submit" class="submit-button" id="submitBtn">
                     <i class="fas fa-search"></i> Find Matches
                 </button>
-                
-                <div class="file-info">
-                    <p>Supported formats: PDF, PNG, JPG, JPEG</p>
-                    <p>Maximum file size: 10MB</p>
-                </div>
             </form>
         </div>
 
@@ -460,80 +359,67 @@
 
         {% if results is not none %}
             <div class="results-section">
-                {% if results %}
-                    <div class="results-header">
-                        <h2>🎯 Your Internship Matches</h2>
-                        <p class="results-stats">Found {{ results|length }} matching opportunities</p>
+                <div class="results-header">
+                    <h2>🎯 Your Matched Internships</h2>
+                    <div class="results-stats">
+                        Found {{ results|length }} internship opportunities
                     </div>
+                </div>
 
-                    {% for job in results %}
-                        <div class="job-card">
-                            <div class="job-header">
-                                <div class="job-title">
-                                    <h3>{{ job.title }}</h3>
-                                    <div class="job-company">{{ job.company }}</div>
+                {% for job in results %}
+                    <div class="job-card">
+                        <div class="job-header">
+                            <div class="job-title">
+                                <h3>{{ job.title }}</h3>
+                                <div class="job-company">{{ job.company }}</div>
+                                {% if job.location %}
                                     <div class="job-location">{{ job.location }}</div>
-                                </div>
-                                <div class="match-score">
-                                    {% if job.score >= 80 %}
-                                        <span class="score-badge score-excellent">{{ job.score }}% Match</span>
-                                    {% elif job.score >= 60 %}
-                                        <span class="score-badge score-good">{{ job.score }}% Match</span>
-                                    {% elif job.score >= 40 %}
-                                        <span class="score-badge score-moderate">{{ job.score }}% Match</span>
-                                    {% else %}
-                                        <span class="score-badge score-weak">{{ job.score }}% Match</span>
-                                    {% endif %}
+                                {% endif %}
+                            </div>
+                            <div class="match-score">
+                                <div class="score-badge 
+                                    {% if job.match_score >= 80 %}score-excellent
+                                    {% elif job.match_score >= 60 %}score-good
+                                    {% elif job.match_score >= 40 %}score-moderate
+                                    {% else %}score-weak{% endif %}">
+                                    {{ job.match_score }}% Match
                                 </div>
                             </div>
-
-                            {% if job.description %}
-                                <div class="job-description">{{ job.description }}</div>
-                            {% endif %}
-
-                            <div class="match-details">
-                                <h4>🔍 Match Analysis</h4>
-                                <div class="match-description">{{ job.match_description }}</div>
-                            </div>
-
-                            {% if job.apply_link %}
-                                <a href="{{ job.apply_link }}" target="_blank" class="apply-button">
-                                    Apply Now <i class="fas fa-external-link-alt"></i>
-                                </a>
-                            {% endif %}
                         </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="results-header">
-                        <h2>No Matches Found</h2>
-                        <p class="results-stats">We couldn't find any matching internships at this time. Try uploading a different resume or check back later for new opportunities.</p>
+
+                        {% if job.description %}
+                            <div class="job-description">
+                                {{ job.description[:300] }}{% if job.description|length > 300 %}...{% endif %}
+                            </div>
+                        {% endif %}
+
+                        {% if job.match_details %}
+                            <div class="match-details">
+                                <h4>Match Analysis</h4>
+                                <div class="match-description">{{ job.match_details }}</div>
+                            </div>
+                        {% endif %}
+
+                        {% if job.apply_url %}
+                            <a href="{{ job.apply_url }}" target="_blank" class="apply-button">
+                                <i class="fas fa-external-link-alt"></i> Apply Now
+                            </a>
+                        {% endif %}
                     </div>
-                {% endif %}
+                {% endfor %}
             </div>
         {% endif %}
     </div>
 
     <script>
-        document.getElementById('resume').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            const submitButton = document.getElementById('submitBtn');
-            
-            if (file) {
-                submitButton.classList.add('active');
-                console.log('File selected:', file.name);
-            } else {
-                submitButton.classList.remove('active');
-            }
-        });
-
         document.getElementById('uploadForm').addEventListener('submit', function(e) {
-            // Remove the prevention logic - let the form submit naturally
-            const fileInput = document.getElementById('resume');
+            const fileInput = document.getElementById('resumeFile');
+            const submitBtn = document.getElementById('submitBtn');
+            
             if (fileInput.files[0]) {
-                document.getElementById('submitBtn').disabled = true;
-                document.getElementById('submitBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
             }
-            // Don't prevent default - let the form submit
         });
     </script>
 </body>
