@@ -12,7 +12,7 @@ import io
 # Import our modules
 from resume_parser import parse_resume, is_valid_resume
 from job_scrapers.dispatcher import scrape_jobs
-from matching.skill_matcher import match_resume_to_jobs
+from matching.matcher import match_resume_to_jobs
 from matching.metadata_matcher import extract_resume_metadata
 
 # Load environment variables

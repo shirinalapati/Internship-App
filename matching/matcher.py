@@ -246,6 +246,29 @@ def extract_skills_from_text(text):
             found_skills.append(skill)
     return found_skills
 
+def match_resume_to_jobs(resume_skills, jobs, resume_text=""):
+    """
+    Match resume skills to a list of jobs and return the best matches.
+    Returns a list of jobs sorted by match score.
+    """
+    matched_jobs = []
+    
+    for job in jobs:
+        score, description = match_job_to_resume(job, resume_skills, resume_text)
+        
+        # Only include jobs with a score above 0 (meaning there's at least some match)
+        if score > 0:
+            job_with_score = job.copy()
+            job_with_score['match_score'] = score
+            job_with_score['match_description'] = description
+            matched_jobs.append(job_with_score)
+    
+    # Sort by match score in descending order
+    matched_jobs.sort(key=lambda x: x['match_score'], reverse=True)
+    
+    # Return top 10 matches to avoid overwhelming the user
+    return matched_jobs[:10]
+
 # resume for user ready to pass to LLM
 #  get profile for user
 # get scraped jobs data and pass to LLM 

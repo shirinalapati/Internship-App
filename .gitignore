@@ -10,3 +10,5 @@ venv/
 
 # Sensitive/resume files
 data/resume.pdf
+
+.env
