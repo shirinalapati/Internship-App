@@ -8,4 +8,7 @@ GOOGLE_CLIENT_SECRET=your_client_secret_here
 GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
 
 # For production (Railway) - uncomment and update with your Railway URL
-# GOOGLE_REDIRECT_URI=https://your-railway-app-name.up.railway.app/auth/google/callback 
+# GOOGLE_REDIRECT_URI=https://your-railway-app-name.up.railway.app/auth/google/callback
+
+# OpenAI API Key for LLM-based resume skill extraction
+OPENAI_API_KEY=your_openai_api_key_here 

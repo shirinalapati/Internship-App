@@ -1,7 +1,7 @@
 import os
 import secrets
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -9,6 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 from dotenv import load_dotenv
 import io
+import json
 
 # Import our modules
 from resume_parser import parse_resume, is_valid_resume
@@ -229,6 +230,7 @@ async def api_match_resume(resume: UploadFile = File(...)):
 
         # Parse resume
         try:
+            print("📄 Step 1/4: Analyzing your resume with AI...")
             resume_skills = parse_resume(file_content, resume.filename)
             if not resume_skills:
                 raise HTTPException(
@@ -239,7 +241,8 @@ async def api_match_resume(resume: UploadFile = File(...)):
             print(f"❌ Error parsing resume: {e}")
             raise HTTPException(status_code=400, detail=f"Error parsing your resume: {str(e)}")
 
-        print(f"🔍 Extracted resume skills: {resume_skills}")
+        print(f"✅ Step 1 complete: Extracted {len(resume_skills)} skills from resume")
+        print(f"🔍 Skills found: {resume_skills}")
 
         # Validate resume content
         try:
@@ -263,29 +266,58 @@ async def api_match_resume(resume: UploadFile = File(...)):
 
         # Scrape jobs
         try:
-            print("🌐 Starting job scraping...")
+            print("🌐 Step 2/4: Scraping latest internship opportunities...")
             jobs = await scrape_jobs()
             if not jobs:
                 raise HTTPException(
                     status_code=500, 
                     detail="Unable to fetch internship opportunities at this time. Please try again later."
                 )
-            print(f"📋 Total jobs scraped: {len(jobs)}")
+            print(f"✅ Step 2 complete: Found {len(jobs)} internship opportunities")
         except Exception as e:
             print(f"❌ Error scraping jobs: {e}")
             raise HTTPException(status_code=500, detail=f"Error fetching internship opportunities: {str(e)}")
 
-        # Match resume to jobs
+        # Match resume to jobs with timeout handling
         try:
-            print("🎯 Starting job matching...")
-            matched_jobs = match_resume_to_jobs(resume_skills, jobs)
-            if not matched_jobs:
+            print("🤖 Step 3/4: Analyzing job requirements with AI...")
+            print(f"🔍 Your skills: {resume_skills}")
+            
+            # Limit jobs to prevent timeout (process max 20 jobs)
+            jobs_to_process = jobs[:20] if len(jobs) > 20 else jobs
+            if len(jobs) > 20:
+                print(f"⚡ Processing first {len(jobs_to_process)} jobs to prevent timeout")
+            
+            print("🎯 Step 4/4: Matching your skills to job requirements...")
+            matched_jobs = match_resume_to_jobs(resume_skills, jobs_to_process, resume_text)
+            
+            print(f"✅ Matching complete: Found {len(matched_jobs)} relevant opportunities")
+            
+            # Filter jobs with score > 0 for the final response
+            jobs_with_matches = [job for job in matched_jobs if job.get('match_score', 0) > 0]
+            
+            if not jobs_with_matches:
+                # Show all jobs with their scores for debugging
+                print("❌ No jobs with score > 0 - showing all job scores for debugging:")
+                for i, job in enumerate(matched_jobs[:5]):
+                    print(f"   Job {i+1}: {job.get('company')} - {job.get('title')} (Score: {job.get('match_score', 0)})")
+                    print(f"      Skills: {job.get('required_skills', [])}")
+                
                 return JSONResponse(content={
                     "success": True,
                     "message": "No matching internship opportunities were found for your skills. Consider updating your resume with more relevant technical skills.",
-                    "jobs": [],
-                    "skills_found": resume_skills
+                    "jobs": matched_jobs[:5],  # Return jobs with scores for debugging
+                    "skills_found": resume_skills,
+                    "debug_info": {
+                        "total_jobs_scraped": len(jobs),
+                        "jobs_processed": len(jobs_to_process),
+                        "skills_extracted": len(resume_skills),
+                        "all_job_scores": [{"company": job.get('company'), "title": job.get('title'), "score": job.get('match_score', 0)} for job in matched_jobs[:5]]
+                    }
                 })
+            
+            # Use jobs with matches for the success response
+            matched_jobs = jobs_with_matches
             print(f"✅ Final matched jobs: {len(matched_jobs)}")
         except Exception as e:
             print(f"❌ Error matching jobs: {e}")
@@ -309,6 +341,119 @@ async def api_match_resume(resume: UploadFile = File(...)):
             status_code=500, 
             detail=f"An unexpected error occurred: {str(e)}. Please try again or contact support if the problem persists."
         )
+
+@app.post("/api/match-stream")
+async def stream_match_resume(resume: UploadFile = File(...)):
+    """Streaming endpoint that provides real-time progress updates"""
+    
+    async def generate_progress():
+        try:
+            # Validate file
+            if not resume:
+                yield f"data: {json.dumps({'error': 'No file was uploaded'})}\n\n"
+                return
+
+            file_extension = resume.filename.split('.')[-1].lower() if resume.filename else ''
+            allowed_extensions = ['pdf', 'png', 'jpg', 'jpeg']
+            
+            if file_extension not in allowed_extensions:
+                yield f"data: {json.dumps({'error': f'Invalid file type: {file_extension}'})}\n\n"
+                return
+
+            # Read file content
+            file_content = await resume.read()
+            if not file_content:
+                yield f"data: {json.dumps({'error': 'Empty file uploaded'})}\n\n"
+                return
+
+            yield f"data: {json.dumps({'step': 1, 'message': 'File uploaded successfully', 'progress': 10})}\n\n"
+
+            # Step 1: Parse resume
+            yield f"data: {json.dumps({'step': 2, 'message': 'Analyzing your resume with AI...', 'progress': 20})}\n\n"
+            
+            try:
+                resume_skills = parse_resume(file_content, resume.filename)
+                if not resume_skills:
+                    yield f"data: {json.dumps({'error': 'No skills detected in resume'})}\n\n"
+                    return
+                    
+                yield f"data: {json.dumps({'step': 3, 'message': f'Found {len(resume_skills)} skills in your resume', 'skills': resume_skills, 'progress': 40})}\n\n"
+                
+            except Exception as e:
+                yield f"data: {json.dumps({'error': f'Resume parsing failed: {str(e)}'})}\n\n"
+                return
+
+            # Get resume text for matching
+            resume_text = ""
+            if resume.content_type == "application/pdf":
+                import pdfplumber
+                with pdfplumber.open(io.BytesIO(file_content)) as pdf:
+                    resume_text = " ".join([page.extract_text() or "" for page in pdf.pages])
+
+            # Step 2: Scrape jobs
+            yield f"data: {json.dumps({'step': 4, 'message': 'Scraping latest internship opportunities...', 'progress': 50})}\n\n"
+            
+            try:
+                jobs = await scrape_jobs()
+                if not jobs:
+                    yield f"data: {json.dumps({'error': 'No jobs found'})}\n\n"
+                    return
+                    
+                yield f"data: {json.dumps({'step': 5, 'message': f'Found {len(jobs)} internship opportunities', 'progress': 60})}\n\n"
+                
+            except Exception as e:
+                yield f"data: {json.dumps({'error': f'Job scraping failed: {str(e)}'})}\n\n"
+                return
+
+            # Step 3: Stream job matching results
+            yield f"data: {json.dumps({'step': 6, 'message': 'Analyzing job requirements and matching...', 'progress': 70})}\n\n"
+            
+            jobs_to_process = jobs[:20] if len(jobs) > 20 else jobs
+            matched_jobs = []
+            
+            for i, job in enumerate(jobs_to_process):
+                try:
+                    from matching.matcher import match_job_to_resume
+                    score, description = match_job_to_resume(job, resume_skills, resume_text)
+                    
+                    job_result = {
+                        'company': job.get('company', 'Unknown'),
+                        'title': job.get('title', 'Unknown'),
+                        'location': job.get('location', 'Unknown'),
+                        'apply_link': job.get('apply_link', '#'),
+                        'match_score': score,
+                        'match_description': description,
+                        'required_skills': job.get('required_skills', [])
+                    }
+                    
+                    matched_jobs.append(job_result)
+                    
+                    # Stream each job result as it's processed
+                    progress = 70 + (i + 1) / len(jobs_to_process) * 25
+                    yield f"data: {json.dumps({'step': 7, 'message': f'Processed {i+1}/{len(jobs_to_process)} jobs', 'job_result': job_result, 'progress': int(progress)})}\n\n"
+                    
+                except Exception as e:
+                    print(f"Error matching job {i+1}: {e}")
+                    continue
+
+            # Sort results and send final response
+            matched_jobs.sort(key=lambda x: x['match_score'], reverse=True)
+            jobs_with_matches = [job for job in matched_jobs if job['match_score'] > 0]
+            
+            yield f"data: {json.dumps({'step': 8, 'message': 'Matching complete!', 'final_results': matched_jobs[:10], 'matches_found': len(jobs_with_matches), 'progress': 100, 'complete': True})}\n\n"
+
+        except Exception as e:
+            yield f"data: {json.dumps({'error': f'Unexpected error: {str(e)}'})}\n\n"
+
+    return StreamingResponse(
+        generate_progress(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream",
+        }
+    )
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

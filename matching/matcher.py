@@ -1,5 +1,16 @@
 import re
 
+def is_skill_match(job_skill, resume_skill):
+    """
+    DEPRECATED: This function used hardcoded skill synonyms.
+    Now replaced with LLM-based dynamic skill matching in llm_skill_extractor.py
+    
+    This function is kept for backward compatibility but should not be used.
+    Use match_skills_dynamically() from llm_skill_extractor instead.
+    """
+    # Simple fallback for backward compatibility
+    return job_skill.lower().strip() == resume_skill.lower().strip()
+
 def extract_user_experience_level(resume_skills, resume_text=""):
     """
     Extract user's experience level from resume skills and text.
@@ -156,37 +167,15 @@ def match_job_to_resume(job, resume_skills, resume_text=""):
     if not job_skills:
         return 0, "❌ Unable to determine required skills for this position."
 
-    # Calculate skill match score
-    matched_skills = []
-    for job_skill in job_skills:
-        for resume_skill in resume_skills:
-            # Strict matching - only exact matches or very close matches
-            job_skill_lower = job_skill.lower().strip()
-            resume_skill_lower = resume_skill.lower().strip()
-            
-            # Exact match
-            if job_skill_lower == resume_skill_lower:
-                matched_skills.append(job_skill)
-                break
-            # Very close match (one is contained within the other, but not just a single letter)
-            elif (len(job_skill_lower) > 2 and len(resume_skill_lower) > 2 and
-                  (job_skill_lower in resume_skill_lower or resume_skill_lower in job_skill_lower)):
-                # Additional check to prevent false matches like "R" matching "Engineering"
-                # Only allow if the shorter skill is at least 3 characters or it's a known programming language
-                shorter_skill = job_skill_lower if len(job_skill_lower) < len(resume_skill_lower) else resume_skill_lower
-                longer_skill = job_skill_lower if len(job_skill_lower) > len(resume_skill_lower) else resume_skill_lower
-                
-                # Known programming languages and tools that are short but valid
-                known_short_skills = ['r', 'go', 'c++', 'c#', 'js', 'ts', 'sql', 'aws', 'gcp', 'ai', 'ml', 'git', 'rust', 'less']
-                
-                # Only match if the shorter skill is at least 3 characters OR it's a known short skill
-                if len(shorter_skill) >= 3 or shorter_skill in known_short_skills:
-                    # Additional check: make sure it's not just a single letter matching a longer word
-                    if len(shorter_skill) == 1 and len(longer_skill) > 3:
-                        continue  # Skip single letter matches with longer words
-                    
-                    matched_skills.append(job_skill)
-                    break
+    # Use dynamic LLM-based skill matching instead of hardcoded logic
+    from matching.llm_skill_extractor import match_skills_dynamically
+    
+    print(f"🔍 Dynamic skill matching - Job skills: {job_skills}")
+    print(f"🔍 Dynamic skill matching - Resume skills: {resume_skills}")
+    
+    # Get dynamic matches with similarity scores
+    skill_matches = match_skills_dynamically(job_skills, resume_skills, threshold=0.7)
+    matched_skills = [match["job_skill"] for match in skill_matches]
 
     if not matched_skills:
         return 0, f"❌ No matching skills found. Required: {', '.join(job_skills[:5])}. Your skills: {', '.join(resume_skills[:5])}."
@@ -224,27 +213,14 @@ def match_job_to_resume(job, resume_skills, resume_text=""):
     return final_score, combined_description
 
 def extract_skills_from_text(text):
-    """Extract skills from text using keyword matching."""
-    skill_keywords = [
-        "Python", "Java", "SQL", "React", "TensorFlow", "Data Analysis", "C++", "JavaScript",
-        "Computer Science", "Technical", "Programming", "Software", "Engineering", "Data", 
-        "Machine Learning", "AI", "Cloud", "Leadership", "Communication", "Teamwork", 
-        "Problem Solving", "Frontend", "Backend", "Full Stack", "DevOps", "Database",
-        "API", "Web Development", "Mobile Development", "iOS", "Android", "Node.js",
-        "Angular", "Vue.js", "Django", "Flask", "Spring", "AWS", "Azure", "GCP",
-        "Docker", "Kubernetes", "Git", "Agile", "Scrum", "Testing", "QA",
-        "Research", "PhD", "Holography", "Material", "Physics", "Mathematics", "Statistics",
-        "Computer Vision", "Deep Learning", "Neural Networks", "Algorithms", "Data Structures",
-        "Optimization", "Simulation", "Modeling", "Scientific Computing", "Numerical Analysis",
-        "Student", "Researcher", "Intern", "BS", "MS", "Bachelor", "Master", "Degree",
-        "Computer", "Science", "Technology", "Developer", "Engineer", "Scientist",
-        "Academic", "University", "College", "Education", "Learning", "Study", "Analysis"
-    ]
-    found_skills = []
-    for skill in skill_keywords:
-        if skill.lower() in text.lower():
-            found_skills.append(skill)
-    return found_skills
+    """Extract skills from text using LLM-based analysis instead of hardcoded keywords."""
+    from matching.llm_skill_extractor import extract_job_skills_with_llm
+    
+    # Use LLM to extract skills from the text
+    # Treat the text as a job description for skill extraction
+    skills = extract_job_skills_with_llm("", text, "")
+    
+    return skills
 
 def match_resume_to_jobs(resume_skills, jobs, resume_text=""):
     """
@@ -253,20 +229,27 @@ def match_resume_to_jobs(resume_skills, jobs, resume_text=""):
     """
     matched_jobs = []
     
-    for job in jobs:
+    print(f"🎯 Starting matching process with {len(jobs)} jobs and {len(resume_skills)} resume skills")
+    
+    for i, job in enumerate(jobs):
+        print(f"🔍 Matching job {i+1}/{len(jobs)}: {job.get('company', 'Unknown')} - {job.get('title', 'Unknown')}")
+        
         score, description = match_job_to_resume(job, resume_skills, resume_text)
         
-        # Only include jobs with a score above 0 (meaning there's at least some match)
-        if score > 0:
-            job_with_score = job.copy()
-            job_with_score['match_score'] = score
-            job_with_score['match_description'] = description
-            matched_jobs.append(job_with_score)
+        print(f"   Score: {score}, Skills: {job.get('required_skills', [])}")
+        
+        # Include ALL jobs with scores (even 0) for debugging
+        job_with_score = job.copy()
+        job_with_score['match_score'] = score
+        job_with_score['match_description'] = description
+        matched_jobs.append(job_with_score)
     
     # Sort by match score in descending order
     matched_jobs.sort(key=lambda x: x['match_score'], reverse=True)
     
-    # Return top 10 matches to avoid overwhelming the user
+    print(f"🎯 Matching complete: {len(matched_jobs)} total jobs, {len([j for j in matched_jobs if j['match_score'] > 0])} with score > 0")
+    
+    # Return all jobs (not just matches) so we can see scores
     return matched_jobs[:10]
 
 # resume for user ready to pass to LLM

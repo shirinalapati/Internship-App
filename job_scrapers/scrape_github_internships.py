@@ -595,12 +595,12 @@ def extract_skills_from_job_page(job_text):
         "computer science", "engineering", "mathematics", "statistics", "physics"
     ]
     
-    found_skills = []
-    for skill in skill_keywords:
-        if skill in job_text:
-            found_skills.append(skill.title())
+    # Use LLM to dynamically extract skills from job page text
+    from matching.llm_skill_extractor import extract_job_skills_with_llm
     
-    return found_skills
+    skills = extract_job_skills_with_llm("", job_text, "")
+    
+    return skills
 
 def extract_job_description(soup):
     """
@@ -947,12 +947,17 @@ def extract_skills_from_job(job):
         "computer science", "engineering", "mathematics", "statistics", "physics"
     ]
     
-    found_skills = []
-    for skill in skill_keywords:
-        if skill in text:
-            found_skills.append(skill.title())
+    # Use LLM to dynamically extract skills instead of hardcoded list
+    from matching.llm_skill_extractor import extract_job_skills_with_llm
     
-    return found_skills
+    job_title = job.get('title', '')
+    job_description = job.get('description', '')
+    company = job.get('company', '')
+    
+    # Use LLM-based extraction
+    skills = extract_job_skills_with_llm(job_title, job_description, company)
+    
+    return skills
 
 def extract_job_metadata(job_title, location, age, apply_link):
     """
@@ -1077,21 +1082,32 @@ def parse_internship_table(content, max_results):
                 if not apply_link and app_links:
                     apply_link = app_links[0].get('href', '')
                 
+                # Generate better description based on role and company
+                detailed_description = generate_detailed_description(company, role, location)
+                
                 # Create job entry
                 job = {
                     'company': company,
                     'title': role,
                     'location': location,
                     'apply_link': apply_link or '#',
-                    'description': f"Software Engineering Internship at {company}",
-                    'required_skills': ['Programming', 'Software Development', 'Computer Science'],
-                    'job_requirements': f"Software engineering internship position at {company}. Location: {location}.",
+                    'description': detailed_description,
+                    'job_requirements': detailed_description,
                     'source': 'github_internships',
-                    'match_score': 75  # Default match score
+                    'required_skills': []  # Will be populated by LLM extraction
                 }
                 
+                # Extract skills using LLM from the detailed description
+                try:
+                    extracted_skills = extract_skills_from_job(job)
+                    job['required_skills'] = extracted_skills if extracted_skills else ['Programming', 'Software Development']
+                    print(f"✅ [GitHub] Added job: {company} - {role} (Skills: {job['required_skills'][:3]}...)")
+                except Exception as e:
+                    print(f"⚠️ [GitHub] Skill extraction failed for {company} - {role}: {e}")
+                    job['required_skills'] = ['Programming', 'Software Development', 'Computer Science']
+                    print(f"✅ [GitHub] Added job: {company} - {role} (Default skills)")
+                
                 jobs.append(job)
-                print(f"✅ [GitHub] Added job: {company} - {role}")
                 
             except Exception as e:
                 print(f"⚠️ [GitHub] Error parsing row: {e}")

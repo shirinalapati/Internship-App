@@ -13,4 +13,5 @@ python-dotenv==1.0.0
 starlette==0.36.3
 httpx==0.25.2
 pytesseract==0.3.13
-pillow==11.3.0 
+pillow==11.3.0
+openai==1.54.3 

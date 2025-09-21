@@ -9,10 +9,12 @@ export interface Job {
   company: string;
   location: string;
   description?: string;
-  score: number;
+  score?: number;
+  match_score?: number;
   match_description: string;
   apply_link?: string;
   requirements?: string[];
+  required_skills?: string[];
   url?: string;
 }
 

@@ -3,10 +3,17 @@ import { Job } from '../types';
 
 interface JobCardProps {
   job: Job;
+  isNewResult?: boolean;
 }
 
-const JobCard: React.FC<JobCardProps> = ({ job }) => {
+const JobCard: React.FC<JobCardProps> = ({ job, isNewResult = false }) => {
   const getMatchScoreClass = (score: number) => {
+    if (score >= 70) return 'high-score';
+    if (score >= 40) return 'medium-score';
+    return 'low-score';
+  };
+
+  const getMatchScoreLabel = (score: number) => {
     if (score >= 80) return 'excellent';
     if (score >= 60) return 'good';
     if (score >= 40) return 'moderate';
@@ -14,7 +21,7 @@ const JobCard: React.FC<JobCardProps> = ({ job }) => {
   };
 
   return (
-    <div className="job-card">
+    <div className={`job-card ${isNewResult ? 'new-result job-streaming' : ''}`}>
       <div className="job-header">
         <div>
           <h3 className="job-title">{job.title}</h3>
@@ -23,8 +30,8 @@ const JobCard: React.FC<JobCardProps> = ({ job }) => {
             <i className="fas fa-map-marker-alt"></i> {job.location}
           </div>
         </div>
-        <div className={`match-score ${getMatchScoreClass(job.score)}`}>
-          {job.score}% Match
+        <div className={`match-score ${getMatchScoreClass(job.match_score || job.score || 0)}`}>
+          {job.match_score || job.score || 0}% Match
         </div>
       </div>
       
