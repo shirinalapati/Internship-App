@@ -12,33 +12,47 @@ interface HomePageProps {
 }
 
 const HomePage: React.FC<HomePageProps> = ({ user }) => {
-  const [jobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [hasResults, setHasResults] = useState(false);
+  const [skillsFound, setSkillsFound] = useState<string[]>([]);
 
   const handleFileUpload = async (file: File) => {
     setIsLoading(true);
     setError('');
     setHasResults(false);
+    setJobs([]);
+    setSkillsFound([]);
 
     try {
       const formData = new FormData();
       formData.append('resume', file);
 
-      await axios.post('/match', formData, {
+      const response = await axios.post('/api/match', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
         timeout: 60000, // 60 second timeout
       });
 
-      // Since the backend returns HTML, we need to handle this differently
-      // For now, we'll redirect to maintain compatibility with the existing backend
-      window.location.href = '/match';
+      const data = response.data;
+      
+      if (data.success) {
+        setJobs(data.jobs || []);
+        setSkillsFound(data.skills_found || []);
+        setHasResults(true);
+        
+        if (data.jobs && data.jobs.length === 0) {
+          setError(data.message || 'No matching opportunities found.');
+        }
+      } else {
+        setError(data.message || 'An error occurred while processing your resume.');
+      }
       
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'An error occurred while processing your resume.');
+      console.error('Upload error:', err);
+      setError(err.response?.data?.detail || err.message || 'An error occurred while processing your resume.');
     } finally {
       setIsLoading(false);
     }
@@ -53,6 +67,17 @@ const HomePage: React.FC<HomePageProps> = ({ user }) => {
       <LoadingSpinner show={isLoading} />
       
       {error && <ErrorMessage error={error} />}
+      
+      {skillsFound.length > 0 && (
+        <div className="skills-section">
+          <h3>🎯 Skills Detected in Your Resume:</h3>
+          <div className="skills-list">
+            {skillsFound.map((skill, index) => (
+              <span key={index} className="skill-tag">{skill}</span>
+            ))}
+          </div>
+        </div>
+      )}
       
       {hasResults && (
         <div className="results-section">

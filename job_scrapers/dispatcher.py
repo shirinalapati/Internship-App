@@ -17,3 +17,11 @@ def scrape_all_company_sites(keyword="intern", max_results=50):
     
     print(f"📋 Total jobs scraped: {len(all_jobs)}")
     return all_jobs
+
+
+async def scrape_jobs(keyword="intern", max_results=50):
+    """
+    Async wrapper for scrape_all_company_sites.
+    This function is called by the FastAPI app.
+    """
+    return scrape_all_company_sites(keyword, max_results)

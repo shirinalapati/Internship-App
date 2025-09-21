@@ -1025,113 +1025,77 @@ def extract_job_metadata(job_title, location, age, apply_link):
 
 def parse_internship_table(content, max_results):
     jobs = []
-    lines = content.split('\n')
-    in_software_section = False
-    last_valid_company = "Unknown"  # Track the last valid company name
     
-    print(f"🔍 [GitHub] Parsing {len(lines)} lines...")
+    print(f"🔍 [GitHub] Parsing {len(content)} characters...")
     
-    for i, line in enumerate(lines):
-        line = line.strip()
-        
-        if "💻 Software Engineering" in line:
-            in_software_section = True
-            print("✅ [GitHub] Found Software Engineering section")
-            continue
-        
-        if (line.startswith('🤖') or line.startswith('📈') or line.startswith('🔧')) and in_software_section:
-            print("🛑 [GitHub] Reached end of Software Engineering section")
+    # Use BeautifulSoup to parse the HTML table
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(content, 'html.parser')
+    
+    # Find all tables
+    tables = soup.find_all('table')
+    
+    if not tables:
+        print("❌ [GitHub] No tables found in content")
+        return jobs
+    
+    # Look for the software engineering table (should be the first one after the header)
+    table = tables[0]  # Assume first table is the software engineering table
+    
+    rows = table.find_all('tr')
+    print(f"🔍 [GitHub] Found table with {len(rows)} rows")
+    
+    # Skip header row
+    for row in rows[1:]:  # Skip the header row
+        if len(jobs) >= max_results:
             break
-        
-        if not in_software_section:
-            continue
-        
-        # Parse job entries
-        if '|' in line and '[' in line and '](' in line:
-            parts = line.split('|')
-            if len(parts) >= 4:
-                # Extract company name (handle "↳" symbol)
-                company_part = parts[1].strip()
-                if company_part == "↳":
-                    company = last_valid_company
-                else:
-                    # Clean up company name (remove markdown links)
-                    company = company_part.replace('**', '').replace('[', '').replace(']', '')
-                    if '(' in company and ')' in company:
-                        company = company.split('(')[0].strip()
-                    last_valid_company = company
+            
+        cells = row.find_all('td')
+        if len(cells) >= 4:  # Company, Role, Location, Application
+            try:
+                # Extract company name
+                company_cell = cells[0]
+                company_link = company_cell.find('a')
+                company = company_link.get_text(strip=True) if company_link else company_cell.get_text(strip=True)
                 
-                # Extract role/title
-                role_part = parts[2].strip()
-                role = role_part.replace('**', '').replace('[', '').replace(']', '')
-                if '(' in role and ')' in role:
-                    role = role.split('(')[0].strip()
+                # Extract role
+                role = cells[1].get_text(strip=True)
                 
-                # Extract location and clean up HTML tags
-                location_part = parts[3].strip()
-                location = location_part.replace('</br>', ', ').replace('<br>', ', ').replace('<br/>', ', ')
-                location = location.replace('**', '').replace('[', '').replace(']', '')
+                # Extract location
+                location = cells[2].get_text(strip=True)
                 
-                # Extract apply link
-                apply_link = ""
-                if '](' in line:
-                    link_start = line.find('](') + 2
-                    link_end = line.find(')', link_start)
-                    if link_end > link_start:
-                        apply_link = line[link_start:link_end]
-                
-                # Extract age (if present)
-                age = ""
-                if len(parts) > 4:
-                    age_part = parts[4].strip()
-                    age = age_part.replace('**', '').replace('[', '').replace(']', '')
-                
-                if apply_link and role and company:
-                    print(f"✅ [GitHub] Added job: {role} at {company}")
-                    
-                    # Get job details from apply link
-                    job_details = scrape_job_details_from_apply_link(apply_link)
-                    
-                    # Create description and skills
-                    if job_details:
-                        description = job_details['description']
-                        required_skills = job_details['required_skills']
-                        print(f"✅ [GitHub] Got real qualifications from {company}")
-                    else:
-                        # Generate detailed description based on company and role
-                        description = generate_detailed_description(company, role, location)
-                        
-                        # Extract skills from the job title and description
-                        required_skills = extract_skills_from_job({
-                            "title": role,
-                            "description": description
-                        })
-                    
-                    # Ensure we always have a description
-                    if not description or description.strip() == "":
-                        description = f"Software Engineering internship at {company}. Role: {role}. Location: {location}. This role involves general software engineering with programming, algorithms, and data structures. This position is suitable for students and recent graduates with strong programming skills and a passion for technology."
-                    
-                    # Extract metadata
-                    metadata = extract_job_metadata(role, location, age, apply_link)
-                    
-                    job = {
-                        "title": role,
-                        "company": company,
-                        "location": location,
-                        "apply_link": apply_link,
-                        "description": description,
-                        "required_skills": required_skills,
-                        "metadata": metadata
-                    }
-                    
-                    # Add job requirements if available
-                    if job_details and 'job_requirements' in job_details:
-                        job['job_requirements'] = job_details['job_requirements']
-                    
-                    jobs.append(job)
-                    
-                    if len(jobs) >= max_results:
+                # Extract application link
+                app_cell = cells[3]
+                app_links = app_cell.find_all('a')
+                apply_link = None
+                for link in app_links:
+                    href = link.get('href', '')
+                    if href and not href.startswith('https://simplify.jobs/p/'):
+                        apply_link = href
                         break
+                
+                if not apply_link and app_links:
+                    apply_link = app_links[0].get('href', '')
+                
+                # Create job entry
+                job = {
+                    'company': company,
+                    'title': role,
+                    'location': location,
+                    'apply_link': apply_link or '#',
+                    'description': f"Software Engineering Internship at {company}",
+                    'required_skills': ['Programming', 'Software Development', 'Computer Science'],
+                    'job_requirements': f"Software engineering internship position at {company}. Location: {location}.",
+                    'source': 'github_internships',
+                    'match_score': 75  # Default match score
+                }
+                
+                jobs.append(job)
+                print(f"✅ [GitHub] Added job: {company} - {role}")
+                
+            except Exception as e:
+                print(f"⚠️ [GitHub] Error parsing row: {e}")
+                continue
     
     print(f"📋 [GitHub] Total jobs parsed: {len(jobs)}")
     return jobs
