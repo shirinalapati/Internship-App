@@ -11,4 +11,11 @@ GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
 # GOOGLE_REDIRECT_URI=https://your-railway-app-name.up.railway.app/auth/google/callback
 
 # OpenAI API Key for LLM-based resume skill extraction
-OPENAI_API_KEY=your_openai_api_key_here 
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Redis Cache Configuration (optional - defaults to localhost)
+# For local development (default if not set)
+REDIS_URL=redis://localhost:6379
+
+# For production - use your cloud Redis URL (Render, Railway, Upstash, etc.)
+# REDIS_URL=redis://username:password@hostname:port 

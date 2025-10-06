@@ -16,6 +16,7 @@ from resume_parser import parse_resume, is_valid_resume
 from job_scrapers.dispatcher import scrape_jobs
 from matching.matcher import match_resume_to_jobs
 from matching.metadata_matcher import extract_resume_metadata
+import job_cache
 
 # Load environment variables
 load_dotenv()
@@ -26,7 +27,7 @@ app = FastAPI(title="Internship Matcher", version="1.0.0")
 # Add CORS middleware for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # React dev server
+    allow_origins=["http://localhost:3001", "http://127.0.0.1:3000"],  # React dev server
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,6 +43,62 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Create upload folder if it doesn't exist
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Startup event to initialize Redis and cache jobs
+@app.on_event("startup")
+async def startup_event():
+    """Initialize Redis and pre-load job cache on server startup"""
+    print("🚀 Starting up Internship Matcher...")
+    
+    # Initialize Redis connection
+    redis_connected = job_cache.init_redis()
+    
+    if redis_connected:
+        # Check if cache exists
+        cached_jobs = job_cache.get_cached_jobs()
+        
+        if cached_jobs:
+            cache_info = job_cache.get_cache_info()
+            print(f"📦 Using existing cache: {cache_info['message']}")
+        else:
+            # Cache is empty - scrape jobs and populate cache
+            print("📥 Cache empty - scraping jobs on startup...")
+            try:
+                jobs = await scrape_jobs()
+                if jobs:
+                    job_cache.set_cached_jobs(jobs)
+                    print(f"✅ Startup cache populated with {len(jobs)} jobs")
+                else:
+                    print("⚠️ No jobs scraped on startup")
+            except Exception as e:
+                print(f"❌ Error scraping jobs on startup: {e}")
+    else:
+        print("⚠️ Running without Redis - jobs will be scraped per request")
+    
+    print("✅ Startup complete!")
+
+async def get_jobs_with_cache():
+    """
+    Get jobs from cache if available, otherwise scrape and cache them.
+    This function is used by all endpoints to get job data efficiently.
+    """
+    # Try to get from cache first
+    cached_jobs = job_cache.get_cached_jobs()
+    
+    if cached_jobs:
+        print(f"⚡ Using {len(cached_jobs)} cached jobs")
+        return cached_jobs
+    
+    # Cache miss - scrape jobs
+    print("🌐 Cache miss - scraping jobs...")
+    jobs = await scrape_jobs()
+    
+    # Try to cache the results for next time
+    if jobs:
+        job_cache.set_cached_jobs(jobs)
+        print(f"✅ Scraped and cached {len(jobs)} jobs")
+    
+    return jobs
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -141,19 +198,19 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
             print(f"⚠️ Warning: Could not validate resume text: {e}")
             # Continue anyway since we have skills extracted
 
-        # Scrape jobs
+        # Get jobs from cache or scrape
         try:
-            print("🌐 Starting job scraping...")
-            jobs = await scrape_jobs()
+            print("🌐 Fetching internship opportunities...")
+            jobs = await get_jobs_with_cache()
             if not jobs:
                 return templates.TemplateResponse("dashboard.html", {
                     "request": request,
                     "results": None,
                     "error": "Unable to fetch internship opportunities at this time. Please try again later."
                 })
-            print(f"📋 Total jobs scraped: {len(jobs)}")
+            print(f"📋 Total jobs available: {len(jobs)}")
         except Exception as e:
-            print(f"❌ Error scraping jobs: {e}")
+            print(f"❌ Error fetching jobs: {e}")
             return templates.TemplateResponse("dashboard.html", {
                 "request": request,
                 "results": None,
@@ -163,7 +220,7 @@ async def match_resume(request: Request, resume: UploadFile = File(...)):
         # Match resume to jobs
         try:
             print("🎯 Starting job matching...")
-            matched_jobs = match_resume_to_jobs(resume_skills, jobs)
+            matched_jobs = match_resume_to_jobs(resume_skills, jobs, resume_text)
             if not matched_jobs:
                 return templates.TemplateResponse("dashboard.html", {
                     "request": request,
@@ -264,10 +321,10 @@ async def api_match_resume(resume: UploadFile = File(...)):
             print(f"⚠️ Warning: Could not validate resume text: {e}")
             # Continue anyway since we have skills extracted
 
-        # Scrape jobs
+        # Get jobs from cache or scrape
         try:
-            print("🌐 Step 2/4: Scraping latest internship opportunities...")
-            jobs = await scrape_jobs()
+            print("🌐 Step 2/4: Fetching internship opportunities...")
+            jobs = await get_jobs_with_cache()
             if not jobs:
                 raise HTTPException(
                     status_code=500, 
@@ -275,7 +332,7 @@ async def api_match_resume(resume: UploadFile = File(...)):
                 )
             print(f"✅ Step 2 complete: Found {len(jobs)} internship opportunities")
         except Exception as e:
-            print(f"❌ Error scraping jobs: {e}")
+            print(f"❌ Error fetching jobs: {e}")
             raise HTTPException(status_code=500, detail=f"Error fetching internship opportunities: {str(e)}")
 
         # Match resume to jobs with timeout handling
@@ -346,33 +403,78 @@ async def api_match_resume(resume: UploadFile = File(...)):
 async def stream_match_resume(resume: UploadFile = File(...)):
     """Streaming endpoint that provides real-time progress updates"""
     
+    # IMPORTANT: Read all file data BEFORE the generator function
+    # to avoid "i/o operation on closed file" errors
+    try:
+        # Validate file
+        if not resume:
+            async def error_response():
+                yield f"data: {json.dumps({'error': 'No file was uploaded'})}\n\n"
+            return StreamingResponse(
+                error_response(),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/event-stream",
+                }
+            )
+
+        file_extension = resume.filename.split('.')[-1].lower() if resume.filename else ''
+        allowed_extensions = ['pdf', 'png', 'jpg', 'jpeg']
+        
+        if file_extension not in allowed_extensions:
+            async def error_response():
+                yield f"data: {json.dumps({'error': f'Invalid file type: {file_extension}'})}\n\n"
+            return StreamingResponse(
+                error_response(),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/event-stream",
+                }
+            )
+
+        # Read file content ONCE, before the generator
+        file_content = await resume.read()
+        filename = resume.filename
+        content_type = resume.content_type
+        
+        if not file_content:
+            async def error_response():
+                yield f"data: {json.dumps({'error': 'Empty file uploaded'})}\n\n"
+            return StreamingResponse(
+                error_response(),
+                media_type="text/plain",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Content-Type": "text/event-stream",
+                }
+            )
+    except Exception as e:
+        async def error_response():
+            yield f"data: {json.dumps({'error': f'File upload error: {str(e)}'})}\n\n"
+        return StreamingResponse(
+            error_response(),
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Content-Type": "text/event-stream",
+            }
+        )
+    
     async def generate_progress():
         try:
-            # Validate file
-            if not resume:
-                yield f"data: {json.dumps({'error': 'No file was uploaded'})}\n\n"
-                return
-
-            file_extension = resume.filename.split('.')[-1].lower() if resume.filename else ''
-            allowed_extensions = ['pdf', 'png', 'jpg', 'jpeg']
-            
-            if file_extension not in allowed_extensions:
-                yield f"data: {json.dumps({'error': f'Invalid file type: {file_extension}'})}\n\n"
-                return
-
-            # Read file content
-            file_content = await resume.read()
-            if not file_content:
-                yield f"data: {json.dumps({'error': 'Empty file uploaded'})}\n\n"
-                return
-
             yield f"data: {json.dumps({'step': 1, 'message': 'File uploaded successfully', 'progress': 10})}\n\n"
 
             # Step 1: Parse resume
             yield f"data: {json.dumps({'step': 2, 'message': 'Analyzing your resume with AI...', 'progress': 20})}\n\n"
             
             try:
-                resume_skills = parse_resume(file_content, resume.filename)
+                resume_skills = parse_resume(file_content, filename)
                 if not resume_skills:
                     yield f"data: {json.dumps({'error': 'No skills detected in resume'})}\n\n"
                     return
@@ -385,16 +487,16 @@ async def stream_match_resume(resume: UploadFile = File(...)):
 
             # Get resume text for matching
             resume_text = ""
-            if resume.content_type == "application/pdf":
+            if content_type == "application/pdf":
                 import pdfplumber
                 with pdfplumber.open(io.BytesIO(file_content)) as pdf:
                     resume_text = " ".join([page.extract_text() or "" for page in pdf.pages])
 
-            # Step 2: Scrape jobs
-            yield f"data: {json.dumps({'step': 4, 'message': 'Scraping latest internship opportunities...', 'progress': 50})}\n\n"
+            # Step 2: Get jobs from cache or scrape
+            yield f"data: {json.dumps({'step': 4, 'message': 'Loading internship opportunities...', 'progress': 50})}\n\n"
             
             try:
-                jobs = await scrape_jobs()
+                jobs = await get_jobs_with_cache()
                 if not jobs:
                     yield f"data: {json.dumps({'error': 'No jobs found'})}\n\n"
                     return
@@ -402,45 +504,73 @@ async def stream_match_resume(resume: UploadFile = File(...)):
                 yield f"data: {json.dumps({'step': 5, 'message': f'Found {len(jobs)} internship opportunities', 'progress': 60})}\n\n"
                 
             except Exception as e:
-                yield f"data: {json.dumps({'error': f'Job scraping failed: {str(e)}'})}\n\n"
+                yield f"data: {json.dumps({'error': f'Job loading failed: {str(e)}'})}\n\n"
                 return
 
-            # Step 3: Stream job matching results
-            yield f"data: {json.dumps({'step': 6, 'message': 'Analyzing job requirements and matching...', 'progress': 70})}\n\n"
+            # Step 3: Use our new two-stage intelligent matching system
+            yield f"data: {json.dumps({'step': 6, 'message': 'Analyzing your profile with AI...', 'progress': 70})}\n\n"
             
-            jobs_to_process = jobs[:20] if len(jobs) > 20 else jobs
-            matched_jobs = []
-            
-            for i, job in enumerate(jobs_to_process):
-                try:
-                    from matching.matcher import match_job_to_resume
-                    score, description = match_job_to_resume(job, resume_skills, resume_text)
-                    
+            try:
+                # Use the new two-stage matching approach
+                matched_jobs = match_resume_to_jobs(resume_skills, jobs, resume_text)
+                
+                yield f"data: {json.dumps({'step': 7, 'message': 'Deep career fit analysis in progress...', 'progress': 85})}\n\n"
+                
+                # Convert to the format expected by frontend
+                formatted_jobs = []
+                for job in matched_jobs:
                     job_result = {
                         'company': job.get('company', 'Unknown'),
                         'title': job.get('title', 'Unknown'),
                         'location': job.get('location', 'Unknown'),
                         'apply_link': job.get('apply_link', '#'),
-                        'match_score': score,
-                        'match_description': description,
+                        'match_score': job.get('match_score', 0),
+                        'match_description': job.get('match_description', ''),
                         'required_skills': job.get('required_skills', [])
                     }
-                    
-                    matched_jobs.append(job_result)
-                    
-                    # Stream each job result as it's processed
-                    progress = 70 + (i + 1) / len(jobs_to_process) * 25
-                    yield f"data: {json.dumps({'step': 7, 'message': f'Processed {i+1}/{len(jobs_to_process)} jobs', 'job_result': job_result, 'progress': int(progress)})}\n\n"
-                    
-                except Exception as e:
-                    print(f"Error matching job {i+1}: {e}")
-                    continue
-
-            # Sort results and send final response
-            matched_jobs.sort(key=lambda x: x['match_score'], reverse=True)
-            jobs_with_matches = [job for job in matched_jobs if job['match_score'] > 0]
-            
-            yield f"data: {json.dumps({'step': 8, 'message': 'Matching complete!', 'final_results': matched_jobs[:10], 'matches_found': len(jobs_with_matches), 'progress': 100, 'complete': True})}\n\n"
+                    formatted_jobs.append(job_result)
+                
+                jobs_with_matches = [job for job in formatted_jobs if job['match_score'] > 0]
+                
+                # Ensure we always return exactly 10 results for consistency
+                final_results = formatted_jobs[:10] if len(formatted_jobs) >= 10 else formatted_jobs
+                
+                # Debug logging
+                print(f"🔍 Streaming final results: {len(final_results)} jobs")
+                for i, job in enumerate(final_results):
+                    print(f"   Job {i+1}: {job['company']} - {job['title']} (Score: {job['match_score']})")
+                
+                yield f"data: {json.dumps({'step': 8, 'message': 'Intelligent matching complete!', 'final_results': final_results, 'matches_found': len(jobs_with_matches), 'total_results': len(final_results), 'progress': 100, 'complete': True})}\n\n"
+                
+            except Exception as e:
+                print(f"❌ Error in two-stage matching: {e}")
+                # Fallback to legacy approach if new system fails
+                yield f"data: {json.dumps({'step': 7, 'message': 'Using fallback matching system...', 'progress': 85})}\n\n"
+                
+                from matching.matcher import match_resume_to_jobs_legacy
+                jobs_to_process = jobs[:20] if len(jobs) > 20 else jobs
+                matched_jobs = match_resume_to_jobs_legacy(resume_skills, jobs_to_process, resume_text)
+                
+                # Format results
+                formatted_jobs = []
+                for job in matched_jobs:
+                    job_result = {
+                        'company': job.get('company', 'Unknown'),
+                        'title': job.get('title', 'Unknown'),
+                        'location': job.get('location', 'Unknown'),
+                        'apply_link': job.get('apply_link', '#'),
+                        'match_score': job.get('match_score', 0),
+                        'match_description': job.get('match_description', ''),
+                        'required_skills': job.get('required_skills', [])
+                    }
+                    formatted_jobs.append(job_result)
+                
+                jobs_with_matches = [job for job in formatted_jobs if job['match_score'] > 0]
+                
+                # Ensure we always return exactly 10 results for consistency
+                final_results = formatted_jobs[:10] if len(formatted_jobs) >= 10 else formatted_jobs
+                
+                yield f"data: {json.dumps({'step': 8, 'message': 'Matching complete!', 'final_results': final_results, 'matches_found': len(jobs_with_matches), 'total_results': len(final_results), 'progress': 100, 'complete': True})}\n\n"
 
         except Exception as e:
             yield f"data: {json.dumps({'error': f'Unexpected error: {str(e)}'})}\n\n"
@@ -454,6 +584,105 @@ async def stream_match_resume(resume: UploadFile = File(...)):
             "Content-Type": "text/event-stream",
         }
     )
+
+@app.get("/api/cache-status")
+async def cache_status():
+    """Get current cache status and information"""
+    cache_info = job_cache.get_cache_info()
+    redis_available = job_cache.is_redis_available()
+    
+    return JSONResponse({
+        "redis_connected": redis_available,
+        "cache_info": cache_info,
+        "cache_key": job_cache.CACHE_KEY,
+        "ttl_hours": job_cache.CACHE_TTL / 3600
+    })
+
+@app.get("/api/test-matching")
+async def test_matching():
+    """Debug endpoint to test matching system with sample data"""
+    try:
+        # Sample test data
+        resume_skills = ["Python", "JavaScript", "React"]
+        resume_text = "Computer Science student with web development experience"
+        
+        sample_jobs = [
+            {
+                "title": "Software Engineer Intern",
+                "company": "TestCorp",
+                "description": "Python and JavaScript development",
+                "location": "San Francisco, CA",
+                "apply_link": "https://example.com/apply",
+                "required_skills": []
+            }
+        ]
+        
+        # Test matching
+        matched_jobs = match_resume_to_jobs(resume_skills, sample_jobs, resume_text)
+        
+        # Format for frontend
+        formatted_jobs = []
+        for job in matched_jobs:
+            job_result = {
+                'company': job.get('company', 'Unknown'),
+                'title': job.get('title', 'Unknown'),
+                'location': job.get('location', 'Unknown'),
+                'apply_link': job.get('apply_link', '#'),
+                'match_score': job.get('match_score', 0),
+                'match_description': job.get('match_description', ''),
+                'required_skills': job.get('required_skills', [])
+            }
+            formatted_jobs.append(job_result)
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Test completed - found {len(formatted_jobs)} matches",
+            "jobs": formatted_jobs,
+            "skills_found": resume_skills,
+            "system_info": {
+                "using_two_stage_matching": True,
+                "llm_enabled": bool(os.getenv("OPENAI_API_KEY")),
+                "job_count": len(formatted_jobs)
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Test matching error: {e}")
+        return JSONResponse({
+            "success": False,
+            "error": str(e),
+            "system_info": {
+                "llm_enabled": bool(os.getenv("OPENAI_API_KEY"))
+            }
+        })
+
+@app.post("/api/refresh-cache")
+async def refresh_cache():
+    """Manually refresh the job cache (admin endpoint)"""
+    try:
+        print("🔄 Manual cache refresh requested...")
+        
+        # Clear existing cache
+        job_cache.clear_cache()
+        
+        # Scrape fresh jobs
+        jobs = await scrape_jobs()
+        
+        if not jobs:
+            raise HTTPException(status_code=500, detail="No jobs scraped")
+        
+        # Cache the new jobs
+        job_cache.set_cached_jobs(jobs)
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Cache refreshed successfully with {len(jobs)} jobs",
+            "job_count": len(jobs),
+            "ttl_hours": 24
+        })
+    except Exception as e:
+        print(f"❌ Error refreshing cache: {e}")
+        raise HTTPException(status_code=500, detail=f"Cache refresh failed: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

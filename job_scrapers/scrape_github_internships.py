@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 
+import os
+from dotenv import load_dotenv
 import requests
 import re
 from bs4 import BeautifulSoup
 import time
+
+# Load environment variables from .env file
+load_dotenv()
 
 GITHUB_INTERNSHIPS_URL = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/dev/README.md"
 
@@ -894,70 +899,114 @@ def scrape_github_internships(keyword="intern", max_results=20):
 def extract_skills_from_job(job):
     """
     Extract skills from job title and description.
+    Uses AGGRESSIVE role inference from job title combined with LLM extraction.
     """
-    text = f"{job['title']} {job['description']}".lower()
-    
-    # Enhanced skill keywords with more technical terms
-    skill_keywords = [
-        # Programming Languages
-        "python", "java", "javascript", "typescript", "c++", "c#", "go", "rust", "kotlin", "swift",
-        "php", "ruby", "scala", "r", "matlab", "perl", "bash", "shell", "powershell",
-        
-        # Web Technologies
-        "react", "angular", "vue", "node.js", "express", "django", "flask", "spring", "laravel",
-        "html", "css", "sass", "less", "bootstrap", "tailwind", "jquery", "ajax", "rest api",
-        "graphql", "websocket", "http", "https", "json", "xml",
-        
-        # Databases & Data
-        "sql", "mysql", "postgresql", "mongodb", "redis", "elasticsearch", "cassandra",
-        "data analysis", "data science", "data engineering", "etl", "data pipeline",
-        "machine learning", "deep learning", "ai", "artificial intelligence", "neural networks",
-        "tensorflow", "pytorch", "scikit-learn", "pandas", "numpy", "matplotlib", "seaborn",
-        "computer vision", "nlp", "natural language processing", "recommendation systems",
-        
-        # Cloud & DevOps
-        "aws", "azure", "gcp", "google cloud", "docker", "kubernetes", "jenkins", "gitlab",
-        "github", "git", "ci/cd", "terraform", "ansible", "prometheus", "grafana",
-        
-        # Software Engineering
-        "software engineering", "software development", "programming", "coding", "algorithm",
-        "data structures", "object-oriented", "functional programming", "design patterns",
-        "microservices", "api development", "backend", "frontend", "full stack", "fullstack",
-        "mobile development", "ios", "android", "react native", "flutter", "xamarin",
-        
-        # Testing & Quality
-        "testing", "unit testing", "integration testing", "qa", "quality assurance",
-        "test automation", "selenium", "junit", "pytest", "jest", "cypress",
-        
-        # Tools & Frameworks
-        "maven", "gradle", "npm", "yarn", "webpack", "babel", "eslint", "prettier",
-        "intellij", "vscode", "eclipse", "vim", "emacs", "linux", "unix", "macos",
-        
-        # Domain Knowledge
-        "e-commerce", "fintech", "healthcare", "cybersecurity", "blockchain", "iot",
-        "embedded systems", "fpga", "hardware", "robotics", "autonomous vehicles",
-        
-        # Soft Skills
-        "leadership", "communication", "teamwork", "problem solving", "agile", "scrum",
-        "project management", "mentoring", "collaboration", "presentation",
-        
-        # Academic/Student Terms
-        "student", "intern", "internship", "co-op", "research", "thesis", "academic",
-        "university", "college", "bachelor", "master", "phd", "graduate", "undergraduate",
-        "computer science", "engineering", "mathematics", "statistics", "physics"
-    ]
-    
-    # Use LLM to dynamically extract skills instead of hardcoded list
-    from matching.llm_skill_extractor import extract_job_skills_with_llm
-    
     job_title = job.get('title', '')
     job_description = job.get('description', '')
     company = job.get('company', '')
     
-    # Use LLM-based extraction
-    skills = extract_job_skills_with_llm(job_title, job_description, company)
+    # STEP 1: Aggressively infer role-specific skills from title FIRST
+    title_skills = infer_skills_from_title_aggressive(job_title)
     
-    return skills
+    # STEP 2: Try LLM extraction to enhance/refine
+    try:
+        from matching.llm_skill_extractor import extract_job_skills_with_llm
+        llm_skills = extract_job_skills_with_llm(job_title, job_description, company)
+        
+        if llm_skills and len(llm_skills) > 2:
+            # Merge title skills with LLM skills, removing duplicates
+            combined = title_skills.copy()
+            for skill in llm_skills:
+                if skill not in combined and skill.lower() not in [s.lower() for s in combined]:
+                    combined.append(skill)
+            return combined[:8]  # Limit to 8 skills
+        else:
+            # LLM didn't find much, use title-inferred skills
+            return title_skills
+            
+    except Exception as e:
+        print(f"⚠️ LLM extraction failed, using title-based inference: {e}")
+        return title_skills
+
+def infer_skills_from_title_aggressive(job_title):
+    """
+    AGGRESSIVELY infer role-specific skills from job title.
+    Every job gets unique, relevant skills based on its title.
+    """
+    title_lower = job_title.lower()
+    skills = []
+    
+    # Extract specific technologies mentioned in title
+    tech_map = {
+        'react': 'React', 'angular': 'Angular', 'vue': 'Vue',
+        'python': 'Python', 'java': 'Java', 'javascript': 'JavaScript',
+        'typescript': 'TypeScript', 'go': 'Go', 'rust': 'Rust',
+        'c++': 'C++', 'c#': 'C#', 'swift': 'Swift', 'kotlin': 'Kotlin',
+        'aws': 'AWS', 'azure': 'Azure', 'gcp': 'GCP',
+        'docker': 'Docker', 'kubernetes': 'Kubernetes',
+        'node': 'Node.js', 'sql': 'SQL', '.net': '.NET'
+    }
+    
+    for keyword, tech in tech_map.items():
+        if keyword in title_lower:
+            skills.append(tech)
+    
+    # Role-based skill inference (order matters - check specific before generic)
+    if "frontend" in title_lower or "front-end" in title_lower or "front end" in title_lower:
+        skills.extend(['JavaScript', 'React', 'HTML', 'CSS', 'TypeScript', 'Frontend Development'])
+    elif "backend" in title_lower or "back-end" in title_lower or "back end" in title_lower:
+        skills.extend(['Python', 'Java', 'SQL', 'API Development', 'Backend Development', 'REST APIs'])
+    elif "full stack" in title_lower or "fullstack" in title_lower or "full-stack" in title_lower:
+        skills.extend(['JavaScript', 'Python', 'SQL', 'React', 'Node.js', 'Full Stack Development'])
+    elif "mobile" in title_lower:
+        skills.extend(['Mobile Development', 'Swift', 'Kotlin', 'Java', 'iOS', 'Android'])
+    elif "data scien" in title_lower or "data analy" in title_lower:
+        skills.extend(['Python', 'SQL', 'Data Analysis', 'Machine Learning', 'Statistics', 'Pandas'])
+    elif "data engineer" in title_lower or ("data" in title_lower and "engineer" in title_lower):
+        skills.extend(['Python', 'SQL', 'ETL', 'Data Pipelines', 'Spark', 'Data Engineering'])
+    elif "machine learning" in title_lower or "ml engineer" in title_lower or " ai " in title_lower:
+        skills.extend(['Python', 'Machine Learning', 'TensorFlow', 'PyTorch', 'Deep Learning'])
+    elif "devops" in title_lower or "sre" in title_lower:
+        skills.extend(['AWS', 'Docker', 'Kubernetes', 'CI/CD', 'Linux', 'DevOps'])
+    elif "cloud" in title_lower:
+        skills.extend(['AWS', 'Azure', 'Cloud Computing', 'Docker', 'Python'])
+    elif "security" in title_lower or "cybersecurity" in title_lower or "cyber" in title_lower:
+        skills.extend(['Cybersecurity', 'Network Security', 'Python', 'Security Analysis'])
+    elif "qa" in title_lower or "test" in title_lower or "sdet" in title_lower or "quality" in title_lower:
+        skills.extend(['Testing', 'Test Automation', 'Selenium', 'Python', 'Java', 'QA'])
+    elif "embedded" in title_lower or "firmware" in title_lower:
+        skills.extend(['C++', 'C', 'Embedded Systems', 'Firmware', 'Hardware'])
+    elif "ios" in title_lower:
+        skills.extend(['Swift', 'iOS', 'Xcode', 'Mobile Development'])
+    elif "android" in title_lower:
+        skills.extend(['Kotlin', 'Java', 'Android', 'Mobile Development'])
+    elif "automation" in title_lower:
+        skills.extend(['Python', 'Automation', 'Testing', 'Scripting'])
+    elif "database" in title_lower or "dba" in title_lower:
+        skills.extend(['SQL', 'Database Design', 'MySQL', 'PostgreSQL'])
+    elif "salesforce" in title_lower or "crm" in title_lower:
+        skills.extend(['Salesforce', 'CRM', 'Apex', 'Lightning'])
+    elif "infrastructure" in title_lower:
+        skills.extend(['Python', 'Infrastructure', 'Cloud Computing', 'DevOps'])
+    else:
+        # Generic software engineering - but still specific!
+        skills.extend(['Python', 'Java', 'Software Development', 'Algorithms', 'Data Structures'])
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_skills = []
+    for skill in skills:
+        if skill.lower() not in seen:
+            seen.add(skill.lower())
+            unique_skills.append(skill)
+    
+    return unique_skills[:8]  # Limit to 8 skills
+
+def infer_skills_from_title(job_title):
+    """
+    Legacy function - redirects to aggressive version.
+    """
+    return infer_skills_from_title_aggressive(job_title)
 
 def extract_job_metadata(job_title, location, age, apply_link):
     """
