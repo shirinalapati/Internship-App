@@ -1,4 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
+import { Button } from './ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Upload, FileCheck, Sparkles } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 interface ResumeUploadFormProps {
   onSubmit: (file: File) => void;
@@ -7,7 +11,6 @@ interface ResumeUploadFormProps {
 
 const ResumeUploadForm: React.FC<ResumeUploadFormProps> = ({ onSubmit, isLoading }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -18,53 +21,73 @@ const ResumeUploadForm: React.FC<ResumeUploadFormProps> = ({ onSubmit, isLoading
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedFile && !isLoading) {
+    if (selectedFile) {
       onSubmit(selectedFile);
     }
   };
 
   return (
-    <div className="upload-section">
-      <h1>🚀 Find Your Perfect Internship</h1>
-      <p className="subtitle">Upload your resume and let AI match you with the best internship opportunities</p>
-      
-      <form className="upload-form" onSubmit={handleSubmit}>
-        <label htmlFor="resume" className="file-input-wrapper">
-          <input
-            type="file"
-            id="resume"
-            ref={fileInputRef}
-            className="file-input"
-            accept=".pdf,.png,.jpg,.jpeg"
-            onChange={handleFileChange}
-            required
-          />
-          <i className="fas fa-upload"></i> 
-          {selectedFile ? selectedFile.name : 'Choose Resume File'}
-        </label>
-        
-        <button 
-          type="submit" 
-          className="upload-btn" 
-          disabled={!selectedFile || isLoading}
-        >
-          {isLoading ? (
-            <>
-              <i className="fas fa-spinner fa-spin"></i> Processing...
-            </>
-          ) : (
-            <>
-              <i className="fas fa-search"></i> Find Matches
-            </>
-          )}
-        </button>
-        
-        <div className="file-info">
-          <p>Supported formats: PDF, PNG, JPG, JPEG</p>
-          <p>Maximum file size: 10MB</p>
-        </div>
-      </form>
-    </div>
+    <Card className="max-w-2xl mx-auto">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Upload className="h-5 w-5" />
+          Upload Your Resume
+        </CardTitle>
+        <CardDescription>
+          Upload your resume (PDF or image) to get personalized internship recommendations
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="flex flex-col items-center gap-4">
+            <label className={cn(
+              "flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition-colors",
+              selectedFile ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:bg-accent"
+            )}>
+              <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                {selectedFile ? (
+                  <>
+                    <FileCheck className="h-8 w-8 mb-2 text-primary" />
+                    <p className="text-sm font-medium">{selectedFile.name}</p>
+                    <p className="text-xs text-muted-foreground">Click to change file</p>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-8 w-8 mb-2 text-muted-foreground" />
+                    <p className="text-sm font-medium">Click to upload</p>
+                    <p className="text-xs text-muted-foreground">PDF, PNG, JPG (MAX. 10MB)</p>
+                  </>
+                )}
+              </div>
+              <input
+                type="file"
+                className="hidden"
+                accept=".pdf,.png,.jpg,.jpeg"
+                onChange={handleFileChange}
+              />
+            </label>
+
+            <Button 
+              type="submit" 
+              className="w-full md:w-auto px-8"
+              disabled={!selectedFile || isLoading}
+            >
+              {isLoading ? (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Find Matches
+                </>
+              )}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 };
 

@@ -1,17 +1,17 @@
 import React from 'react';
+import { Loader2 } from 'lucide-react';
 
 interface LoadingSpinnerProps {
-  show: boolean;
+  show?: boolean;
 }
 
-const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ show }) => {
+const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ show = false }) => {
   if (!show) return null;
 
   return (
-    <div className="loading show">
-      <div className="spinner"></div>
-      <p>Analyzing your resume and finding the best matches...</p>
-      <p><small>This may take up to 30 seconds</small></p>
+    <div className="flex flex-col items-center justify-center py-12">
+      <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      <p className="mt-4 text-sm text-muted-foreground">Analyzing your resume...</p>
     </div>
   );
 };

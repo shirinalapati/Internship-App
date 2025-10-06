@@ -6,8 +6,12 @@ This replaces all hardcoded skill lists with dynamic, AI-powered extraction.
 import os
 import json
 import hashlib
+from dotenv import load_dotenv
 from openai import OpenAI
 from typing import List, Dict, Any
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Simple in-memory cache for job skills to avoid re-processing
 _job_skills_cache = {}
@@ -37,43 +41,30 @@ def extract_job_skills_with_llm(job_title: str, job_description: str, company: s
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
         prompt = f"""
-You are an expert job requirements analyzer. Extract ONLY the technical and professional skills that are explicitly required or strongly preferred for this job position.
+You are an expert job requirements analyzer. Analyze this internship role and extract the SPECIFIC technical skills required.
 
 CRITICAL INSTRUCTIONS:
-1. Extract skills that are ACTUALLY mentioned in the job posting
-2. Focus on concrete, actionable skills (not vague terms like "good communication")
-3. Include both technical skills (programming languages, tools, frameworks) and relevant soft skills
-4. Use standard industry names for technologies (e.g., "JavaScript" not "JS")
-5. Don't infer skills that aren't mentioned - only extract what's explicitly stated
-6. Include experience levels only if specifically mentioned (e.g., "3+ years Python")
+1. PAY CLOSE ATTENTION to the job title - it reveals the role's focus (Frontend, Backend, Mobile, Data, Security, etc.)
+2. If the job title mentions specific technologies (e.g., "React", "Python", "AWS"), ALWAYS include them
+3. Infer role-specific skills based on the job title:
+   - Frontend/Front-End → JavaScript, React/Angular/Vue, HTML, CSS, TypeScript
+   - Backend/Back-End → Python/Java/Go, SQL, API Development, Microservices
+   - Full Stack → JavaScript, Python/Java, SQL, React, Backend, Frontend
+   - Mobile → Swift, Kotlin, Java, Mobile Development, iOS/Android
+   - Data Scientist/Analyst → Python, SQL, Data Analysis, Machine Learning, Statistics
+   - Data Engineer → Python, SQL, ETL, Data Pipelines, Spark
+   - DevOps/Cloud → AWS/Azure/GCP, Docker, Kubernetes, CI/CD, Terraform
+   - Security/Cybersecurity → Security, Cryptography, Network Security, Python
+   - ML/AI → Python, Machine Learning, TensorFlow/PyTorch, Deep Learning
+   - QA/Test → Testing, Automation, Selenium, Python/Java
+4. Extract any specific technologies mentioned in the description
+5. Return 5-8 concrete, specific skills (not generic terms like "programming")
 
-SKILL CATEGORIES TO LOOK FOR:
-- Programming Languages & Technologies
-- Frameworks & Libraries  
-- Databases & Data Tools
-- Cloud Platforms & DevOps Tools
-- Development Tools & IDEs
-- Methodologies (Agile, Scrum, etc.)
-- Domain-specific knowledge
-- Relevant soft skills (if explicitly mentioned)
-
-Return your response as a JSON object with this exact structure:
+Return JSON format:
 {{
-    "required_skills": [
-        "skill1",
-        "skill2", 
-        "skill3"
-    ],
-    "preferred_skills": [
-        "skill4",
-        "skill5"
-    ],
-    "experience_requirements": [
-        "requirement1",
-        "requirement2"
-    ],
-    "extraction_confidence": "high/medium/low",
-    "notes": "Brief explanation of extraction approach"
+    "required_skills": ["skill1", "skill2", "skill3", ...],
+    "role_type": "frontend/backend/fullstack/mobile/data/security/devops/general",
+    "confidence": "high/medium/low"
 }}
 
 Job Information:
@@ -87,26 +78,33 @@ Description: {job_description}
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a precise job requirements analyzer that extracts only explicitly mentioned skills from job postings. You never hallucinate or add skills that aren't clearly stated in the job description."
+                    "content": "You are a technical recruiter who understands what skills are needed for different software engineering roles. You infer specific technical requirements from job titles and descriptions."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            temperature=0.1,  # Low temperature for consistency
-            max_tokens=1000,
+            temperature=0.3,  # Slightly higher for more varied extraction
+            max_tokens=800,
             response_format={"type": "json_object"}
         )
         
         result = json.loads(response.choices[0].message.content)
         
-        # Combine required and preferred skills
-        all_skills = result.get("required_skills", []) + result.get("preferred_skills", [])
+        # Get required skills
+        all_skills = result.get("required_skills", [])
+        
+        # If LLM returned too few skills or generic ones, enhance with role-based inference
+        if len(all_skills) < 3 or all(skill.lower() in ['programming', 'algorithms', 'data structures'] for skill in all_skills):
+            print(f"⚡ LLM skills too generic, enhancing with role-based inference...")
+            role_skills = infer_skills_from_role_type(job_title, result.get("role_type", "general"))
+            # Merge but prioritize LLM skills
+            all_skills = list(dict.fromkeys(all_skills + role_skills))  # Remove duplicates, keep order
         
         print(f"🤖 LLM extracted {len(all_skills)} skills from job: {job_title}")
         print(f"🤖 Skills: {all_skills}")
-        print(f"🤖 Confidence: {result.get('extraction_confidence', 'unknown')}")
+        print(f"🤖 Role: {result.get('role_type', 'unknown')}, Confidence: {result.get('confidence', 'unknown')}")
         
         # Cache the result
         _job_skills_cache[cache_key] = all_skills
@@ -119,6 +117,68 @@ Description: {job_description}
         skills = extract_job_skills_fallback(job_title, job_description)
         _job_skills_cache[cache_key] = skills
         return skills
+
+def infer_skills_from_role_type(job_title: str, role_type: str) -> List[str]:
+    """
+    Infer specific technical skills based on role type and job title.
+    """
+    title_lower = job_title.lower()
+    
+    # Check for specific technologies in title
+    specific_tech = []
+    tech_keywords = {
+        'react': 'React', 'angular': 'Angular', 'vue': 'Vue',
+        'python': 'Python', 'java': 'Java', 'javascript': 'JavaScript',
+        'typescript': 'TypeScript', 'go': 'Go', 'rust': 'Rust',
+        'c++': 'C++', 'c#': 'C#', 'swift': 'Swift', 'kotlin': 'Kotlin',
+        'aws': 'AWS', 'azure': 'Azure', 'gcp': 'GCP',
+        'docker': 'Docker', 'kubernetes': 'Kubernetes',
+        'tensorflow': 'TensorFlow', 'pytorch': 'PyTorch',
+        'sql': 'SQL', 'mongodb': 'MongoDB', 'redis': 'Redis'
+    }
+    
+    for keyword, skill in tech_keywords.items():
+        if keyword in title_lower:
+            specific_tech.append(skill)
+    
+    # Role-based skills
+    role_skills = []
+    
+    if 'frontend' in title_lower or 'front-end' in title_lower or 'front end' in title_lower:
+        role_skills = ['JavaScript', 'React', 'HTML', 'CSS', 'TypeScript', 'Frontend Development']
+    elif 'backend' in title_lower or 'back-end' in title_lower or 'back end' in title_lower:
+        role_skills = ['Python', 'Java', 'SQL', 'API Development', 'Backend Development', 'REST APIs']
+    elif 'full stack' in title_lower or 'fullstack' in title_lower or 'full-stack' in title_lower:
+        role_skills = ['JavaScript', 'Python', 'SQL', 'React', 'Node.js', 'Full Stack Development']
+    elif 'mobile' in title_lower:
+        role_skills = ['Mobile Development', 'Swift', 'Kotlin', 'Java', 'iOS', 'Android']
+    elif 'data scien' in title_lower or 'data analy' in title_lower:
+        role_skills = ['Python', 'SQL', 'Data Analysis', 'Machine Learning', 'Statistics', 'Pandas']
+    elif 'data engineer' in title_lower:
+        role_skills = ['Python', 'SQL', 'ETL', 'Data Pipelines', 'Spark', 'Data Engineering']
+    elif 'machine learning' in title_lower or 'ml engineer' in title_lower or ' ai ' in title_lower:
+        role_skills = ['Python', 'Machine Learning', 'TensorFlow', 'PyTorch', 'Deep Learning', 'Neural Networks']
+    elif 'devops' in title_lower or 'sre' in title_lower:
+        role_skills = ['AWS', 'Docker', 'Kubernetes', 'CI/CD', 'Linux', 'DevOps']
+    elif 'cloud' in title_lower:
+        role_skills = ['AWS', 'Azure', 'Cloud Computing', 'Docker', 'Kubernetes']
+    elif 'security' in title_lower or 'cybersecurity' in title_lower:
+        role_skills = ['Cybersecurity', 'Network Security', 'Python', 'Security Analysis', 'Cryptography']
+    elif 'qa' in title_lower or 'test' in title_lower or 'sdet' in title_lower:
+        role_skills = ['Testing', 'Test Automation', 'Selenium', 'Python', 'Java', 'QA']
+    elif 'embedded' in title_lower or 'firmware' in title_lower:
+        role_skills = ['C++', 'C', 'Embedded Systems', 'Firmware', 'Hardware']
+    elif 'ios' in title_lower:
+        role_skills = ['Swift', 'iOS', 'Xcode', 'Mobile Development']
+    elif 'android' in title_lower:
+        role_skills = ['Kotlin', 'Java', 'Android', 'Mobile Development']
+    else:
+        # Generic software engineering
+        role_skills = ['Programming', 'Algorithms', 'Data Structures', 'Software Development', 'Problem Solving']
+    
+    # Combine specific tech from title with role-based skills
+    combined = specific_tech + [s for s in role_skills if s not in specific_tech]
+    return combined[:8]  # Limit to 8 skills
 
 def extract_job_skills_fallback(job_title: str, job_description: str) -> List[str]:
     """
@@ -354,3 +414,207 @@ Description: {job_description}
             "job_type": "internship",
             "extraction_confidence": "low"
         }
+
+# Simple in-memory cache for candidate profiles
+_candidate_profile_cache = {}
+
+def analyze_candidate_profile_with_llm(resume_skills: List[str], resume_text: str = "") -> Dict[str, Any]:
+    """
+    Analyze candidate profile once and cache the result for the session.
+    This replaces repeated analysis for each job matching.
+    """
+    # Create cache key from resume content
+    cache_key = hashlib.md5(f"{str(resume_skills)}{resume_text}".encode()).hexdigest()
+    
+    # Check cache first
+    if cache_key in _candidate_profile_cache:
+        print("🔄 Using cached candidate profile analysis")
+        return _candidate_profile_cache[cache_key]
+    
+    try:
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        prompt = f"""
+Analyze this candidate's profile and create a comprehensive summary for job matching.
+
+CANDIDATE INFORMATION:
+Skills: {resume_skills}
+Resume Text: {resume_text}
+
+ANALYZE AND EXTRACT:
+1. Top 8-10 strongest technical skills (prioritized by proficiency/relevance)
+2. Experience level (student, recent_graduate, entry_level, experienced)
+3. Career interests and direction (frontend, backend, fullstack, data, mobile, etc.)
+4. Learning style and adaptability indicators
+5. Leadership/collaboration potential
+6. Industry preferences (if any)
+7. Work style preferences (startup vs big tech, remote vs office, etc.)
+8. Growth potential and trajectory
+
+Return JSON:
+{{
+    "top_skills": ["Python", "React", "SQL", "JavaScript", "Git"],
+    "experience_level": "student",
+    "career_direction": "fullstack",
+    "specialization_areas": ["web development", "backend apis"],
+    "learning_indicators": "strong self-learner, enjoys new technologies",
+    "leadership_potential": "medium",
+    "adaptability_score": "high",
+    "preferred_industries": ["technology", "startups"],
+    "work_style": "collaborative, prefers hands-on learning",
+    "growth_trajectory": "rapid learner with strong fundamentals",
+    "confidence_level": "high"
+}}
+"""
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert career counselor and technical recruiter who understands candidate potential and job fit."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.3,
+            max_tokens=800,
+            response_format={"type": "json_object"}
+        )
+        
+        result = json.loads(response.choices[0].message.content)
+        
+        print(f"🤖 Analyzed candidate profile: {result.get('experience_level')} {result.get('career_direction')} developer")
+        print(f"🤖 Top skills: {result.get('top_skills', [])}")
+        
+        # Cache the result
+        _candidate_profile_cache[cache_key] = result
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error analyzing candidate profile: {e}")
+        # Fallback to basic analysis
+        return {
+            "top_skills": resume_skills[:8],
+            "experience_level": "student",
+            "career_direction": "general",
+            "confidence_level": "low"
+        }
+
+def llm_deep_ranking(candidate_profile: Dict[str, Any], top_jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Use LLM to intelligently rank the top 30 jobs and return the best 10.
+    This replaces mechanical scoring with intelligent compatibility analysis.
+    """
+    if not top_jobs:
+        return []
+    
+    try:
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        # Prepare candidate summary
+        candidate_summary = f"""
+Experience Level: {candidate_profile.get('experience_level', 'unknown')}
+Career Direction: {candidate_profile.get('career_direction', 'general')}
+Top Skills: {', '.join(candidate_profile.get('top_skills', []))}
+Specializations: {', '.join(candidate_profile.get('specialization_areas', []))}
+Learning Style: {candidate_profile.get('learning_indicators', 'adaptable')}
+Growth Potential: {candidate_profile.get('growth_trajectory', 'steady learner')}
+"""
+        
+        # Prepare job summaries
+        job_summaries = []
+        for i, job in enumerate(top_jobs, 1):
+            job_summary = f"{i}. {job.get('company', 'Unknown')} - {job.get('title', 'Unknown')}"
+            if job.get('required_skills'):
+                job_summary += f" | Skills: {', '.join(job.get('required_skills', [])[:5])}"
+            if job.get('location'):
+                job_summary += f" | Location: {job.get('location', 'N/A')}"
+            job_summaries.append(job_summary)
+        
+        prompt = f"""
+You are an expert career counselor. Analyze this candidate and rank these job opportunities for the BEST CAREER FIT.
+
+CANDIDATE PROFILE:
+{candidate_summary}
+
+JOB OPPORTUNITIES:
+{chr(10).join(job_summaries)}
+
+RANKING CRITERIA:
+1. Skill alignment and transferability
+2. Growth and learning opportunities  
+3. Career trajectory fit
+4. Company culture compatibility
+5. Role progression potential
+6. Learning curve appropriateness
+7. Long-term career impact
+
+Return JSON with top 10 jobs ranked by best fit:
+{{
+    "rankings": [
+        {{
+            "job_index": 1,
+            "compatibility_score": 95,
+            "reasoning": "Perfect skill match with excellent growth opportunities",
+            "growth_potential": "high",
+            "skill_development": "React, advanced JS patterns",
+            "career_impact": "strong foundation for fullstack career"
+        }},
+        ...
+    ],
+    "overall_analysis": "This candidate shows strong potential for frontend development roles..."
+}}
+
+Focus on COMPATIBILITY and GROWTH, not just skill matching.
+"""
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a senior career counselor and technical recruiter with deep understanding of career development and job fit."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.3,
+            max_tokens=1500,
+            response_format={"type": "json_object"}
+        )
+        
+        result = json.loads(response.choices[0].message.content)
+        rankings = result.get("rankings", [])
+        
+        print(f"🤖 LLM deep ranking completed: {len(rankings)} jobs ranked")
+        
+        # Map rankings back to job objects with enhanced descriptions
+        ranked_jobs = []
+        for ranking in rankings[:10]:  # Top 10 only
+            job_index = ranking.get("job_index", 1) - 1  # Convert to 0-based index
+            
+            if 0 <= job_index < len(top_jobs):
+                job = top_jobs[job_index].copy()
+                
+                # Enhanced match description using LLM reasoning (frontend-friendly format)
+                enhanced_description = f"🎯 Compatibility Score: {ranking.get('compatibility_score', 0)}/100\n\n✨ Why This Role Fits You:\n{ranking.get('reasoning', 'Good skill alignment')}\n\n🚀 Growth Opportunities:\n• Skill Development: {ranking.get('skill_development', 'Various technical skills')}\n• Career Impact: {ranking.get('career_impact', 'Valuable experience')}\n• Growth Potential: {ranking.get('growth_potential', 'Good')}\n\n📍 Location: {job.get('location', 'Not specified')}"
+                
+                job['match_score'] = ranking.get('compatibility_score', 0)
+                job['match_description'] = enhanced_description.strip()
+                ranked_jobs.append(job)
+        
+        print(f"✅ Returning {len(ranked_jobs)} intelligently ranked jobs")
+        return ranked_jobs
+        
+    except Exception as e:
+        print(f"❌ Error in LLM deep ranking: {e}")
+        print("🔄 Falling back to score-based ranking")
+        
+        # Fallback: return jobs sorted by their existing match scores
+        return sorted(top_jobs, key=lambda x: x.get('match_score', 0), reverse=True)[:10]
