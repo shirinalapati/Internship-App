@@ -14,3 +14,6 @@ data/resume.pdf
 .env
 .env.local
 uploads/
+# Database files
+jobs.db
+*.db

@@ -871,12 +871,54 @@ def extract_job_description(soup):
         print(f"⚠️ Error extracting job description: {e}")
         return "About this company: Software Engineering internship position. Please click 'Apply Here' for detailed information."
 
-def scrape_github_internships(keyword="intern", max_results=20):
+def filter_jobs_by_date(jobs, max_days=None):
+    """
+    Filter jobs based on how recently they were posted.
+    
+    Args:
+        jobs: List of job dictionaries
+        max_days: Maximum number of days since posted (e.g., 30 for jobs posted in last 30 days)
+                  If None, return all jobs
+    
+    Returns:
+        Filtered list of jobs
+    """
+    if max_days is None:
+        return jobs
+    
+    filtered = []
+    skipped = 0
+    
+    for job in jobs:
+        days_since = job.get('days_since_posted')
+        
+        if days_since is None:
+            # If we can't determine the date, include it (benefit of doubt)
+            filtered.append(job)
+        elif days_since <= max_days:
+            filtered.append(job)
+        else:
+            skipped += 1
+    
+    if skipped > 0:
+        print(f"📅 [Date Filter] Filtered out {skipped} jobs older than {max_days} days")
+    
+    return filtered
+
+def scrape_github_internships(keyword="intern", max_results=10000, incremental=False, max_days_old=None):
     """
     Scrape internship listings from the Summer 2026 Tech Internships GitHub repository.
     This is much more reliable than scraping individual company career sites.
+    
+    Args:
+        keyword: Search keyword (not used for GitHub scraping)
+        max_results: Maximum number of results to return
+        incremental: If True, only return new jobs not in database
+        max_days_old: If set, only return jobs posted within this many days (e.g., 30 for last 30 days)
     """
-    print("🔍 [GitHub Internships] Scraping from Summer 2026 Tech Internships repository...")
+    scrape_type = "incremental" if incremental else "full"
+    date_filter_msg = f" (last {max_days_old} days)" if max_days_old else ""
+    print(f"🔍 [GitHub Internships] Starting {scrape_type} scrape{date_filter_msg} from Summer 2026 Tech Internships repository...")
     
     try:
         # Get the raw markdown content from GitHub
@@ -887,13 +929,29 @@ def scrape_github_internships(keyword="intern", max_results=20):
         markdown_content = response.text
         
         # Parse the markdown table structure
-        jobs = parse_internship_table(markdown_content, max_results)
+        all_jobs = parse_internship_table(markdown_content, max_results)
         
-        print(f"✅ [GitHub Internships] Found {len(jobs)} internship opportunities")
-        return jobs
+        # Apply date filter if specified
+        if max_days_old is not None:
+            all_jobs = filter_jobs_by_date(all_jobs, max_days_old)
+        
+        if incremental:
+            # Filter to only new jobs using database comparison
+            try:
+                from job_cache import get_new_jobs_only
+                filtered_jobs = get_new_jobs_only(all_jobs)
+                print(f"✅ [GitHub Internships] {scrape_type} scrape: {len(filtered_jobs)} new jobs (from {len(all_jobs)} total)")
+                return filtered_jobs
+            except Exception as e:
+                print(f"⚠️ [GitHub Internships] Incremental filtering failed: {e}")
+                print(f"📝 [GitHub Internships] Falling back to full scrape")
+                return all_jobs
+        else:
+            print(f"✅ [GitHub Internships] {scrape_type} scrape: {len(all_jobs)} total jobs")
+            return all_jobs
         
     except Exception as e:
-        print(f"❌ [GitHub Internships] Error scraping: {e}")
+        print(f"❌ [GitHub Internships] Error during {scrape_type} scrape: {e}")
         return []
 
 def extract_skills_from_job(job):
@@ -1077,6 +1135,113 @@ def extract_job_metadata(job_title, location, age, apply_link):
     
     return metadata
 
+def parse_date_to_days(date_string):
+    """
+    Parse various date formats and convert to days since posted.
+    Handles formats like:
+    - "Oct 21" (Month Day)
+    - "2025-10-21" (ISO date)
+    - "21 days ago"
+    - "3 weeks ago"
+    - "2 months ago"
+    - "Yesterday"
+    - "Today"
+    
+    Returns:
+        int: Number of days since posted, or None if unable to parse
+    """
+    if not date_string or date_string == "Unknown":
+        return None
+    
+    date_string = date_string.strip().lower()
+    
+    try:
+        # Import datetime for date parsing
+        from datetime import datetime, timedelta
+        import re
+        
+        # Handle relative time formats
+        if "today" in date_string or "just now" in date_string:
+            return 0
+        elif "yesterday" in date_string:
+            return 1
+        elif "day" in date_string or "d" == date_string[-1]:
+            # Format: "X days ago" or "Xd"
+            match = re.search(r'(\d+)\s*d', date_string)
+            if match:
+                return int(match.group(1))
+        elif "week" in date_string or "w" == date_string[-1]:
+            # Format: "X weeks ago" or "Xw"
+            match = re.search(r'(\d+)\s*w', date_string)
+            if match:
+                return int(match.group(1)) * 7
+        elif "month" in date_string or "mo" in date_string:
+            # Format: "X months ago" or "Xmo"
+            match = re.search(r'(\d+)\s*mo', date_string)
+            if match:
+                return int(match.group(1)) * 30
+        elif "year" in date_string or "y" == date_string[-1]:
+            # Format: "X years ago" or "Xy"
+            match = re.search(r'(\d+)\s*y', date_string)
+            if match:
+                return int(match.group(1)) * 365
+        
+        # Handle date formats like "Oct 21", "Oct 21, 2025", "2025-10-21"
+        current_year = datetime.now().year
+        
+        # Try ISO format first: YYYY-MM-DD
+        try:
+            posted_date = datetime.strptime(date_string, '%Y-%m-%d')
+            days_diff = (datetime.now() - posted_date).days
+            return max(0, days_diff)  # Don't return negative days
+        except:
+            pass
+        
+        # Try format: "Month Day" (e.g., "Oct 21")
+        try:
+            # Add current year
+            posted_date = datetime.strptime(f"{date_string} {current_year}", '%b %d %Y')
+            days_diff = (datetime.now() - posted_date).days
+            
+            # If the date is in the future, it was probably from last year
+            if days_diff < 0:
+                posted_date = datetime.strptime(f"{date_string} {current_year - 1}", '%b %d %Y')
+                days_diff = (datetime.now() - posted_date).days
+            
+            return max(0, days_diff)
+        except:
+            pass
+        
+        # Try format: "Month Day, Year" (e.g., "Oct 21, 2025")
+        try:
+            posted_date = datetime.strptime(date_string, '%b %d, %Y')
+            days_diff = (datetime.now() - posted_date).days
+            return max(0, days_diff)
+        except:
+            pass
+        
+        # Try format: "MM/DD/YYYY" or "DD/MM/YYYY"
+        try:
+            posted_date = datetime.strptime(date_string, '%m/%d/%Y')
+            days_diff = (datetime.now() - posted_date).days
+            return max(0, days_diff)
+        except:
+            pass
+        
+        try:
+            posted_date = datetime.strptime(date_string, '%d/%m/%Y')
+            days_diff = (datetime.now() - posted_date).days
+            return max(0, days_diff)
+        except:
+            pass
+        
+        print(f"⚠️ [Date Parser] Could not parse date format: '{date_string}'")
+        return None
+        
+    except Exception as e:
+        print(f"⚠️ [Date Parser] Error parsing date '{date_string}': {e}")
+        return None
+
 def parse_internship_table(content, max_results):
     jobs = []
     
@@ -1099,13 +1264,29 @@ def parse_internship_table(content, max_results):
     rows = table.find_all('tr')
     print(f"🔍 [GitHub] Found table with {len(rows)} rows")
     
+    # Parse header to determine column indices
+    header_row = rows[0] if rows else None
+    date_posted_index = None
+    
+    if header_row:
+        headers = [cell.get_text(strip=True).lower() for cell in header_row.find_all(['th', 'td'])]
+        print(f"🔍 [GitHub] Table headers: {headers}")
+        
+        # Find the date posted column (can have various names)
+        date_keywords = ['date posted', 'posted', 'date added', 'added', 'date']
+        for idx, header in enumerate(headers):
+            if any(keyword in header for keyword in date_keywords):
+                date_posted_index = idx
+                print(f"✅ [GitHub] Found date column at index {date_posted_index}: '{header}'")
+                break
+    
     # Skip header row
     for row in rows[1:]:  # Skip the header row
         if len(jobs) >= max_results:
             break
             
         cells = row.find_all('td')
-        if len(cells) >= 4:  # Company, Role, Location, Application
+        if len(cells) >= 4:  # Company, Role, Location, Application (minimum required)
             try:
                 # Extract company name
                 company_cell = cells[0]
@@ -1131,6 +1312,21 @@ def parse_internship_table(content, max_results):
                 if not apply_link and app_links:
                     apply_link = app_links[0].get('href', '')
                 
+                # Extract date posted if available
+                date_posted = None
+                date_posted_raw = None
+                days_since_posted = None
+                
+                if date_posted_index is not None and len(cells) > date_posted_index:
+                    date_posted_raw = cells[date_posted_index].get_text(strip=True)
+                    date_posted = date_posted_raw
+                    
+                    # Parse the date to extract days since posted for filtering
+                    days_since_posted = parse_date_to_days(date_posted_raw)
+                    
+                    if days_since_posted is not None:
+                        print(f"📅 [GitHub] {company} - {role}: Posted {days_since_posted} days ago ({date_posted_raw})")
+                
                 # Generate better description based on role and company
                 detailed_description = generate_detailed_description(company, role, location)
                 
@@ -1143,18 +1339,23 @@ def parse_internship_table(content, max_results):
                     'description': detailed_description,
                     'job_requirements': detailed_description,
                     'source': 'github_internships',
-                    'required_skills': []  # Will be populated by LLM extraction
+                    'required_skills': [],  # Will be populated by LLM extraction
+                    'date_posted': date_posted,  # Raw date string
+                    'date_posted_raw': date_posted_raw,  # Original date string from source
+                    'days_since_posted': days_since_posted  # Normalized to days for filtering
                 }
                 
                 # Extract skills using LLM from the detailed description
                 try:
                     extracted_skills = extract_skills_from_job(job)
                     job['required_skills'] = extracted_skills if extracted_skills else ['Programming', 'Software Development']
-                    print(f"✅ [GitHub] Added job: {company} - {role} (Skills: {job['required_skills'][:3]}...)")
+                    date_info = f" (Posted: {date_posted})" if date_posted else ""
+                    print(f"✅ [GitHub] Added job: {company} - {role}{date_info} (Skills: {job['required_skills'][:3]}...)")
                 except Exception as e:
                     print(f"⚠️ [GitHub] Skill extraction failed for {company} - {role}: {e}")
                     job['required_skills'] = ['Programming', 'Software Development', 'Computer Science']
-                    print(f"✅ [GitHub] Added job: {company} - {role} (Default skills)")
+                    date_info = f" (Posted: {date_posted})" if date_posted else ""
+                    print(f"✅ [GitHub] Added job: {company} - {role}{date_info} (Default skills)")
                 
                 jobs.append(job)
                 

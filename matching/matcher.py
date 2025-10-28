@@ -1,4 +1,7 @@
 import re
+import os
+import json
+from openai import OpenAI
 
 def is_skill_match(job_skill, resume_skill):
     """
@@ -279,38 +282,272 @@ def extract_skills_from_text(text):
     
     return skills
 
-def fast_job_score(job, resume_skills):
+def generate_llm_based_description(job, llm_analysis, resume_skills):
     """
-    Ultra-fast job scoring for pre-filtering without LLM calls.
-    Uses basic skill matching and cached job skills.
+    Generate rich career fit description based on LLM analysis data.
+    This replaces the legacy match_job_to_resume description with LLM-based insights.
+    """
+    company_name = job.get('company', 'Unknown Company')
+    full_title = job.get('title', 'Unknown Position')
+    location = job.get('location', 'Location not specified')
+    score = llm_analysis.get('score', 0)
+    complexity = llm_analysis.get('resume_complexity', 'UNKNOWN')
+    experience_match = llm_analysis.get('experience_match', 'unknown')
+    skill_count = llm_analysis.get('skill_match_count', 0)
+    reasoning = llm_analysis.get('reasoning', 'No analysis available')
+    
+    # Create opening line based on score and complexity
+    if score >= 80:
+        if complexity == 'ADVANCED':
+            opening = f"🎯 **{company_name}** - Excellent match! This {full_title} position aligns perfectly with your advanced profile."
+        else:
+            opening = f"🎯 **{company_name}** - Great match! This {full_title} role is well-suited for your background."
+    elif score >= 60:
+        opening = f"✅ **{company_name}** - Good fit! This {full_title} position shows strong alignment with your skills."
+    elif score >= 40:
+        opening = f"⚠️ **{company_name}** - Moderate match. This {full_title} role has some promising elements."
+    else:
+        opening = f"📊 **{company_name}** - Limited match. This {full_title} position has minimal alignment."
+    
+    # Add LLM reasoning insights
+    reasoning_section = f"\n\n**🤖 AI Analysis:** {reasoning}"
+    
+    # Add complexity and experience insights
+    profile_section = f"\n\n**📊 Profile Match:**"
+    profile_section += f"\n- Resume Complexity: **{complexity}** level"
+    profile_section += f"\n- Experience Alignment: **{experience_match}**"
+    
+    if skill_count > 0:
+        profile_section += f"\n- Skills Matched: **{skill_count}** relevant skills identified"
+    
+    # Add location info
+    location_info = f"\n\n**📍 Location:** {location}"
+    
+    # Add final score with context
+    score_context = f"\n\n**🎯 Match Score: {score}/100**"
+    if score >= 70:
+        score_context += " - **Highly Recommended**"
+    elif score >= 40:
+        score_context += " - **Worth Considering**"
+    else :
+        score_context += " - **May Not Be Ideal**"
+    
+    # Combine everything
+    return opening + reasoning_section + profile_section + location_info + score_context
+
+def intelligent_resume_based_scoring(job, resume_skills, resume_text=""):
+    """
+    LLM-based intelligent job scoring that analyzes resume complexity and candidate fit.
+    This replaces rule-based scoring with AI-powered matching that considers:
+    1. Resume complexity and sophistication
+    2. Experience level appropriateness
+    3. Skill matching quality
+    4. Career trajectory alignment
+    
+    Returns: score (0-100)
+    """
+    if not resume_text or not resume_text.strip():
+        print("⚠️ No resume text provided for intelligent scoring, using fallback")
+        return fast_job_score_fallback(job, resume_skills)
+    
+    try:
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        # Prepare job information
+        job_title = job.get("title", "Unknown Position")
+        job_company = job.get("company", "Unknown Company")
+        job_description = job.get("description", "No description available")
+        job_location = job.get("location", "Location not specified")
+        job_skills = job.get("required_skills", [])
+        
+        # Create comprehensive prompt for intelligent matching
+        prompt = f"""You are an expert career advisor and resume analyst. Analyze this candidate's resume against this job opportunity.
+
+CANDIDATE RESUME ANALYSIS:
+Resume Skills: {resume_skills}
+Full Resume Text: {resume_text[:2000]}  # Limit for token efficiency
+
+JOB OPPORTUNITY:
+Company: {job_company}
+Title: {job_title}
+Location: {job_location}
+Description: {job_description[:1000]}
+Required Skills: {job_skills}
+
+YOUR TASK - ANALYZE AND SCORE (0-100):
+
+1. **RESUME COMPLEXITY ANALYSIS (40% weight - MOST IMPORTANT)**:
+   - Evaluate resume sophistication and depth
+   - Consider: project complexity, work experience quality, technical depth, problem-solving demonstrated
+   - Indicators of ADVANCED resume:
+     * Multiple substantial projects with technical details
+     * Work experience at known companies
+     * Leadership roles, mentoring, or teaching experience
+     * Research papers, publications, or open source contributions
+     * Advanced coursework or specializations
+     * Awards, competitions, or recognition
+     * Deep technical implementations (not just "used React")
+   - Indicators of BEGINNER resume:
+     * Minimal work experience or only academic projects
+     * Basic coursework projects
+     * Surface-level skill mentions
+     * No demonstrated depth in any technology
+     * Limited context or details
+   
+   Rate complexity: ADVANCED (80-100), INTERMEDIATE (50-79), BEGINNER (0-49)
+
+2. **EXPERIENCE LEVEL MATCHING (30% weight)**:
+   - Is this job appropriate for the candidate's level?
+   - CRITICAL: If job requires "senior", "lead", "5+ years", "10+ years", "architect", "principal", "manager"
+     AND candidate is BEGINNER/INTERMEDIATE → Score = 0 (immediate disqualification)
+   - Match entry-level candidates with entry-level/intern roles
+   - Match advanced candidates with appropriate challenging roles
+
+3. **SKILL ALIGNMENT (20% weight)**:
+   - How many required skills does the candidate actually possess?
+   - Quality of skill match (demonstrated experience vs just mentioned)
+   - Require minimum 2 matching skills or score = 0
+
+4. **CAREER FIT (10% weight)**:
+   - Does this job align with the candidate's trajectory?
+   - Would this be a good next step for their career?
+
+SCORING RULES:
+- Return 0 if:
+  * Job requires senior/experienced level and candidate is beginner
+  * Job requires 5+ years and resume shows < 2 years
+  * Less than 2 matching skills
+  * Job is clearly misaligned with candidate level
+- Return 1-40 for poor matches (not recommended)
+- Return 41-70 for acceptable matches (reasonable fit)
+- Return 71-100 for excellent matches (strong recommendation)
+
+**HEAVY EMPHASIS**: Resume complexity should be the PRIMARY factor. An advanced candidate with a sophisticated resume should NOT match entry-level positions, and a beginner should NOT match senior roles.
+
+Return JSON:
+{{
+    "score": 85,
+    "resume_complexity": "ADVANCED/INTERMEDIATE/BEGINNER",
+    "complexity_score": 75,
+    "experience_match": "excellent/good/acceptable/poor/disqualified",
+    "skill_match_count": 5,
+    "reasoning": "Brief 1-2 sentence explanation of the score",
+    "red_flags": ["Any disqualifying factors if score < 40"]
+}}
+"""
+
+        response = client.chat.completions.create(
+            model="gpt-5",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert career advisor who analyzes resume complexity and job fit. You heavily weight resume sophistication when determining if a job is appropriate for a candidate. You prevent mismatches by filtering out senior roles for beginners and entry roles for advanced candidates."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.2,  # Low for consistency
+            max_tokens=400,
+            response_format={"type": "json_object"}
+        )
+        
+        result = json.loads(response.choices[0].message.content)
+        score = result.get("score", 0)
+        complexity = result.get("resume_complexity", "UNKNOWN")
+        reasoning = result.get("reasoning", "No reasoning provided")
+        
+        print(f"🤖 Intelligent Scoring: {job_company} - {job_title}")
+        print(f"   Score: {score}/100 | Complexity: {complexity}")
+        print(f"   Reasoning: {reasoning}")
+        
+        # Return full analysis object instead of just score
+        return {
+            "score": score,
+            "resume_complexity": complexity,
+            "complexity_score": result.get("complexity_score", score),
+            "experience_match": result.get("experience_match", "unknown"),
+            "skill_match_count": result.get("skill_match_count", 0),
+            "reasoning": reasoning,
+            "red_flags": result.get("red_flags", [])
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in intelligent scoring for {job.get('title', 'Unknown')}: {e}")
+        # Fallback to rule-based scoring if LLM fails
+        fallback_score = fast_job_score_fallback(job, resume_skills)
+        return {
+            "score": fallback_score,
+            "resume_complexity": "UNKNOWN",
+            "complexity_score": fallback_score,
+            "experience_match": "fallback",
+            "skill_match_count": 0,
+            "reasoning": "LLM analysis failed, using fallback scoring",
+            "red_flags": []
+        }
+
+def fast_job_score_fallback(job, resume_skills):
+    """
+    Fallback rule-based scoring when LLM is unavailable.
+    This is the original fast_job_score logic.
     """
     from matching.llm_skill_extractor import match_skills_dynamically, extract_job_skills_with_llm
     
-    # Get job skills (uses caching)
+    # CRITICAL: Filter out senior/experienced roles
+    job_title = job.get("title", "").lower()
+    job_description = job.get("description", "").lower()
+    
+    # Check for senior/experienced indicators
+    senior_indicators = [
+        "senior", "lead", "principal", "staff", "architect", "manager", "director",
+        "10+ years", "12+ years", "15+ years", "20+ years", "extensive experience",
+        "expert", "advanced", "seasoned", "veteran", "senior level", "leadership"
+    ]
+    
+    for indicator in senior_indicators:
+        if indicator in job_title or indicator in job_description:
+            return 0
+    
+    # Check for high experience requirements
+    experience_patterns = [
+        r'(\d+)\+?\s*years?\s*(?:of\s+)?experience',
+        r'(\d+)\+?\s*years?\s*(?:of\s+)?(?:software|development|programming)'
+    ]
+    
+    for pattern in experience_patterns:
+        matches = re.findall(pattern, f"{job_title} {job_description}")
+        for match in matches:
+            try:
+                years = int(match)
+                if years >= 5:
+                    return 0
+            except ValueError:
+                continue
+    
+    # Get job skills
     job_skills = job.get("required_skills", [])
     if not job_skills:
-        # Only extract if not already cached
         job_skills = extract_job_skills_with_llm(
             job.get("title", ""), 
             job.get("description", ""), 
             job.get("company", "")
         )
-        job["required_skills"] = job_skills  # Cache in job object
+        job["required_skills"] = job_skills
     
     if not job_skills or not resume_skills:
         return 0
     
-    # Fast skill matching without LLM
+    # Fast skill matching
     matches = match_skills_dynamically(job_skills, resume_skills, threshold=0.7)
     matched_skills = [match["job_skill"] for match in matches]
     
-    if not matched_skills:
+    if len(matched_skills) < 2:
         return 0
     
-    # Simple ratio-based scoring for pre-filtering
+    # Simple ratio-based scoring
     skill_score = round(100 * len(matched_skills) / len(job_skills))
     
-    # Basic bonus for good matches
     if len(matched_skills) >= 3:
         skill_score += 10
     elif len(matched_skills) >= 2:
@@ -318,82 +555,648 @@ def fast_job_score(job, resume_skills):
     
     return min(100, skill_score)
 
+def intelligent_prefilter_jobs(jobs, resume_skills, resume_metadata, target_count=50):
+    """
+    Sophisticated multi-layer pre-filtering to select the best job candidates
+    from the full cache for LLM analysis. Preserves accuracy while being efficient.
+    """
+    if len(jobs) <= target_count:
+        print(f"⚡ Only {len(jobs)} jobs available, returning all for analysis")
+        return jobs
+    
+    print(f"🔍 Pre-filtering {len(jobs)} jobs to top {target_count} candidates...")
+    
+    # Stage 1A: Hard requirement filtering
+    experience_level = resume_metadata.get('experience_level', 'student')
+    years_experience = resume_metadata.get('years_of_experience', 0)
+    is_student = resume_metadata.get('is_student', True)
+    
+    filtered_jobs = []
+    for job in jobs:
+        job_title = job.get('title', '').lower()
+        job_description = job.get('description', '').lower()
+        
+        # Filter out senior/inappropriate roles
+        senior_indicators = ['senior', 'lead', 'principal', 'staff', 'architect', 'manager', 'director']
+        if any(indicator in job_title for indicator in senior_indicators):
+            if experience_level in ['student', 'recent_graduate'] or years_experience < 3:
+                continue  # Skip senior roles for junior candidates
+        
+        # Filter out high experience requirements
+        import re
+        exp_patterns = [r'(\d+)\+?\s*years?\s*(?:of\s+)?experience', r'(\d+)\+?\s*years?\s*(?:of\s+)?(?:software|development|programming)']
+        skip_job = False
+        for pattern in exp_patterns:
+            matches = re.findall(pattern, f"{job_title} {job_description}")
+            for match in matches:
+                try:
+                    required_years = int(match)
+                    if required_years >= 5 and years_experience < 3:
+                        skip_job = True
+                        break
+                except ValueError:
+                    continue
+            if skip_job:
+                break
+        
+        if skip_job:
+            continue
+            
+        filtered_jobs.append(job)
+    
+    print(f"   After requirement filtering: {len(filtered_jobs)} jobs remain")
+    
+    # Stage 1B: Smart skill-based scoring
+    scored_jobs = []
+    for job in filtered_jobs:
+        score = calculate_prefilter_score(job, resume_skills, resume_metadata)
+        scored_jobs.append((job, score))
+    
+    # Sort by score and take top candidates
+    scored_jobs.sort(key=lambda x: x[1], reverse=True)
+    top_jobs = [job for job, score in scored_jobs[:target_count]]
+    
+    print(f"   After intelligent filtering: {len(top_jobs)} jobs selected for LLM analysis")
+    return top_jobs
+
+def calculate_prefilter_score(job, resume_skills, resume_metadata):
+    """
+    Calculate a preliminary score for job filtering based on multiple factors.
+    """
+    job_title = job.get('title', '').lower()
+    job_description = job.get('description', '').lower()
+    company = job.get('company', '').lower()
+    location = job.get('location', '').lower()
+    
+    score = 0
+    
+    # Factor 1: Direct skill matches in job title (highest weight)
+    title_skills = 0
+    for skill in resume_skills:
+        skill_lower = skill.lower()
+        if skill_lower in job_title:
+            title_skills += 15  # High bonus for skill in title
+        elif any(variant in job_title for variant in [skill_lower.replace('.', ''), skill_lower.replace('js', 'javascript')]):
+            title_skills += 10  # Bonus for skill variants
+    
+    score += min(title_skills, 45)  # Cap at 45 points
+    
+    # Factor 2: Skill matches in description
+    description_skills = 0
+    for skill in resume_skills:
+        skill_lower = skill.lower()
+        if skill_lower in job_description:
+            description_skills += 5
+        elif any(variant in job_description for variant in [skill_lower.replace('.', ''), skill_lower.replace('js', 'javascript')]):
+            description_skills += 3
+    
+    score += min(description_skills, 25)  # Cap at 25 points
+    
+    # Factor 3: Domain alignment
+    domain_keywords = {
+        'frontend': ['frontend', 'front-end', 'react', 'angular', 'vue', 'javascript', 'html', 'css'],
+        'backend': ['backend', 'back-end', 'server', 'api', 'node', 'python', 'java', 'database'],
+        'fullstack': ['fullstack', 'full-stack', 'full stack'],
+        'mobile': ['mobile', 'ios', 'android', 'react native', 'flutter', 'swift', 'kotlin'],
+        'data': ['data', 'analytics', 'machine learning', 'ai', 'python', 'sql', 'pandas'],
+        'devops': ['devops', 'cloud', 'aws', 'azure', 'docker', 'kubernetes', 'infrastructure']
+    }
+    
+    user_domains = set()
+    for domain, keywords in domain_keywords.items():
+        if any(keyword.lower() in [skill.lower() for skill in resume_skills] for keyword in keywords):
+            user_domains.add(domain)
+    
+    job_domains = set()
+    job_text = f"{job_title} {job_description}"
+    for domain, keywords in domain_keywords.items():
+        if any(keyword in job_text for keyword in keywords):
+            job_domains.add(domain)
+    
+    domain_overlap = len(user_domains.intersection(job_domains))
+    score += domain_overlap * 8  # 8 points per domain match
+    
+    # Factor 4: Company quality indicators
+    quality_indicators = ['google', 'microsoft', 'amazon', 'apple', 'meta', 'netflix', 'uber', 'airbnb', 'stripe', 'spotify']
+    if any(indicator in company for indicator in quality_indicators):
+        score += 10  # Bonus for top-tier companies
+    
+    # Factor 5: Remote/location preferences
+    if 'remote' in location:
+        score += 5  # Bonus for remote positions
+    elif 'hybrid' in location:
+        score += 3
+    
+    # Factor 6: Internship indicators
+    internship_indicators = ['intern', 'internship', 'summer', 'co-op', 'new grad', 'entry level']
+    if any(indicator in job_title for indicator in internship_indicators):
+        score += 8  # Bonus for clearly marked internships
+    
+    return score
+
+def batch_analyze_jobs_with_llm(filtered_jobs, resume_skills, resume_text, resume_metadata):
+    """
+    Comprehensive batch LLM analysis of pre-filtered jobs.
+    Single LLM call to analyze all jobs with detailed scoring and reasoning.
+    """
+    if not filtered_jobs:
+        return []
+    
+    print(f"🤖 Starting batch LLM analysis of {len(filtered_jobs)} jobs...")
+    
+    try:
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        # Create candidate profile summary
+        experience_level = resume_metadata.get('experience_level', 'student')
+        years_experience = resume_metadata.get('years_of_experience', 0)
+        
+        # Format jobs for batch analysis
+        jobs_summary = []
+        for i, job in enumerate(filtered_jobs):
+            job_summary = {
+                "job_id": i + 1,
+                "company": job.get('company', 'Unknown'),
+                "title": job.get('title', 'Unknown'),
+                "location": job.get('location', 'Unknown'),
+                "description": job.get('description', '')[:500]  # Limit description length
+            }
+            jobs_summary.append(job_summary)
+        
+        # Create comprehensive batch analysis prompt
+        prompt = f"""You are an expert technical recruiter and career advisor who values REAL-WORLD IMPACT and PROJECT DEPTH over keyword matching.
+
+CANDIDATE PROFILE:
+Resume Skills: {resume_skills}
+Experience Level: {experience_level} ({years_experience} years)
+Full Resume Context: {resume_text[:1500]}
+
+JOBS TO ANALYZE ({len(filtered_jobs)} positions):
+{json.dumps(jobs_summary, indent=2)}
+
+YOUR TASK - COMPREHENSIVE BATCH ANALYSIS:
+
+For EACH job, provide detailed analysis using this WEIGHTED SCORING SYSTEM:
+
+🏆 SCORING WEIGHTS (Total = 100 points):
+
+1. **PROJECT DEPTH & REAL-WORLD IMPACT (35% - HIGHEST PRIORITY)**
+   Look for evidence of:
+   - ✅ PRODUCTION DEPLOYMENTS: "deployed to production", "live users", "in production"
+   - ✅ REAL USER IMPACT: Actual user counts, engagement metrics, downloads, usage stats
+   - ✅ TECHNICAL COMPLEXITY: System design, scalability, architecture, performance optimization
+   - ✅ PROBLEM-SOLVING DEPTH: Specific technical challenges solved (not just "built a website")
+   - ✅ PROJECT SCALE: Team size, codebase size, duration, iterations
+   - ✅ TANGIBLE RESULTS: Revenue generated, users acquired, performance improvements (e.g., "reduced load time by 40%")
+   
+   🚫 IGNORE KEYWORD RESUMES: If resume just lists technologies without depth ("Built app using React, Node.js") = LOW SCORE
+   ⭐ REWARD DEPTH: "Deployed React app to AWS with 500+ daily users, implemented Redis caching reducing API latency by 60%" = HIGH SCORE
+
+2. **WORK EXPERIENCE QUALITY (25%)**
+   - Real internships/jobs at actual companies >> Academic projects
+   - Startup/company experience >> Side projects >> Coursework
+   - Leadership roles, mentoring, team collaboration
+   - Open source contributions, published work
+   - Research with publications or citations
+
+3. **SKILL ALIGNMENT WITH JOB (20%)**
+   - How many DEMONSTRATED skills (not just mentioned) match the role?
+   - Quality over quantity: Deep expertise in 2-3 technologies > Surface knowledge of 10
+   - Consider technology stack alignment (e.g., React experience for React role)
+
+4. **EXPERIENCE LEVEL APPROPRIATENESS (15%)**
+   - Is this role suitable for candidate's level?
+   - CRITICAL: Senior roles for juniors = 0 score
+   - Entry-level roles for advanced candidates = lower score (they'd be bored)
+
+5. **CAREER TRAJECTORY & GROWTH POTENTIAL (5%)**
+   - Does this role advance their career?
+   - Learning opportunities in the role
+   - Company reputation and mentorship
+
+📊 SCORING EXAMPLES:
+
+HIGH SCORE (80-95):
+- "Deployed full-stack e-commerce platform with 1000+ users, integrated Stripe payments, built CI/CD pipeline with GitHub Actions" → 85
+- "Interned at Microsoft on Azure team, shipped feature used by 10K+ developers, reduced deployment time by 50%" → 92
+
+MEDIUM SCORE (50-70):
+- "Built multiple React projects including todo app and weather app with API integration" → 55
+- "Completed 3 academic projects: database system, mobile app, web scraper" → 60
+
+LOW SCORE (20-40):
+- "Familiar with React, Node.js, Python, Java, AWS, Docker..." (just keywords, no depth) → 25
+- "Course projects using various technologies" (no specifics) → 30
+
+2. **REASONING** (2-3 sentences): Be SPECIFIC about:
+   - What production/real-world experience stands out?
+   - Which demonstrated skills (with depth) match this role?
+   - Why this score vs higher/lower?
+
+3. **RED_FLAGS**: Note if:
+   - Resume is all keywords with no substance
+   - Experience level mismatch
+   - No evidence of actual deployments or real work
+
+4. **SKILL_MATCHES**: Only list skills with DEMONSTRATED depth (not just mentioned)
+5. **SKILL_GAPS**: Important skills for the role they don't show evidence of
+
+⚠️ CRITICAL REQUIREMENTS:
+- NO two jobs should have identical scores (vary based on specifics)
+- HEAVILY PENALIZE keyword-only resumes without depth
+- HEAVILY REWARD production deployments and real-world impact
+- Value 1 production project > 10 tutorial projects
+- Look for metrics, users, performance improvements, business impact
+- Consider: "Would I hire this person based on proven results, not buzzwords?"
+
+Return ONLY valid JSON:
+{{
+  "analysis_summary": "Overall assessment of candidate's market fit",
+  "job_scores": [
+    {{
+      "job_id": 1,
+      "company": "Company Name",
+      "title": "Job Title",
+      "match_score": 85,
+      "reasoning": "Candidate deployed production app with 500+ users using React/Node stack matching role requirements. Demonstrated scaling and performance optimization experience. Strong fit for this full-stack internship.",
+      "red_flags": [],
+      "skill_matches": ["React", "Node.js", "AWS", "PostgreSQL"],
+      "skill_gaps": ["TypeScript", "GraphQL"]
+    }}
+  ]
+}}"""
+
+        response = client.chat.completions.create(
+            model="gpt-5",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert technical recruiter who values DEMONSTRATED IMPACT over buzzwords. You heavily weight: production deployments, real users, measurable results, technical depth, and proven problem-solving. You penalize keyword-stuffed resumes without substance. You ensure scoring diversity by carefully weighing each candidate's real-world accomplishments."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.3,  # Some creativity for diverse scoring
+            max_tokens=4000,   # Large response for comprehensive analysis
+            response_format={"type": "json_object"}
+        )
+        
+        result = json.loads(response.choices[0].message.content)
+        job_scores = result.get("job_scores", [])
+        
+        print(f"✅ Batch LLM analysis complete: {len(job_scores)} jobs analyzed")
+        print(f"📊 Score range: {min([j['match_score'] for j in job_scores])}-{max([j['match_score'] for j in job_scores])}")
+        
+        return job_scores
+        
+    except Exception as e:
+        print(f"❌ Error in batch LLM analysis: {e}")
+        
+        # Fallback: use enhanced rule-based scoring
+        print("🔄 Using enhanced fallback scoring...")
+        fallback_scores = []
+        for i, job in enumerate(filtered_jobs):
+            fallback_score = fast_job_score_fallback(job, resume_skills)
+            fallback_scores.append({
+                "job_id": i + 1,
+                "company": job.get('company', 'Unknown'),
+                "title": job.get('title', 'Unknown'),
+                "match_score": fallback_score,
+                "reasoning": f"Fallback analysis - {fallback_score}% skill match",
+                "red_flags": [],
+                "skill_matches": [],
+                "skill_gaps": []
+            })
+        
+        return fallback_scores
+
+def enhance_batch_results(llm_scores, original_jobs, resume_skills=None):
+    """
+    Enhance LLM batch results with original job data and create rich descriptions.
+    """
+    enhanced_jobs = []
+    
+    for score_data in llm_scores:
+        job_id = score_data.get("job_id", 1) - 1  # Convert to 0-based index
+        
+        if job_id < len(original_jobs):
+            original_job = original_jobs[job_id]
+            
+            # Create enhanced job object
+            enhanced_job = original_job.copy()
+            enhanced_job['match_score'] = score_data.get('match_score', 0)
+            
+            # Create rich AI reasoning object with meaningful data
+            match_score = score_data.get('match_score', 0)
+            skill_matches = score_data.get('skill_matches', [])
+            skill_gaps = score_data.get('skill_gaps', [])
+            reasoning = score_data.get('reasoning', '').lower()
+            
+            # Fallback: If LLM didn't provide skill matches/gaps, extract them manually
+            if not skill_matches and not skill_gaps:
+                job_skills = original_job.get('required_skills', [])
+                if job_skills and resume_skills:
+                    # Use dynamic skill matching to get actual matches
+                    try:
+                        from matching.llm_skill_extractor import match_skills_dynamically
+                        # Get real skill matches using the dynamic matching system
+                        matches = match_skills_dynamically(job_skills, resume_skills, threshold=0.7)
+                        skill_matches = [match["job_skill"] for match in matches]
+                        
+                        # Skills that weren't matched are gaps
+                        skill_gaps = [skill for skill in job_skills if skill not in skill_matches]
+                    except:
+                        # Final fallback based on score
+                        if match_score > 0:
+                            # If there's a score > 0, assume some matches exist
+                            skill_matches = job_skills[:min(2, len(job_skills))]
+                            skill_gaps = job_skills[len(skill_matches):]
+                        else:
+                            # No matches, all skills are gaps
+                            skill_matches = []
+                            skill_gaps = job_skills[:5]  # Limit to 5 for display
+                elif job_skills:
+                    # No resume skills available, treat all job skills as gaps
+                    skill_matches = []
+                    skill_gaps = job_skills[:5]  # Limit to 5 for display
+            
+            # Determine resume complexity based on score, skills, AND real-world impact indicators
+            # Look for production/impact keywords in the reasoning
+            production_indicators = [
+                'production', 'deployed', 'users', 'live', 'published', 'shipped',
+                'performance', 'scale', 'optimization', 'real-world', 'impact',
+                'metrics', 'revenue', 'intern', 'company', 'team', 'enterprise'
+            ]
+            
+            impact_count = sum(1 for indicator in production_indicators if indicator in reasoning)
+            
+            # Advanced: High score + many skills + production impact
+            if match_score >= 75 and len(skill_matches) >= 4 and impact_count >= 2:
+                resume_complexity = "ADVANCED"
+            # Intermediate: Good score + decent skills OR strong production impact
+            elif match_score >= 60 or len(skill_matches) >= 3 or impact_count >= 3:
+                resume_complexity = "INTERMEDIATE"
+            else:
+                resume_complexity = "ENTRY_LEVEL"
+            
+            # Determine experience match description based on score and impact
+            if match_score >= 80:
+                if impact_count >= 3:
+                    experience_match = "Excellent - Proven production experience aligns perfectly"
+                else:
+                    experience_match = "Excellent - Your skills align perfectly with this role"
+            elif match_score >= 70:
+                if impact_count >= 2:
+                    experience_match = "Strong - Real-world experience matches key requirements"
+                else:
+                    experience_match = "Strong - You have most key qualifications"
+            elif match_score >= 60:
+                experience_match = "Good - Solid foundation with room to grow"
+            elif match_score >= 40:
+                experience_match = "Moderate - Some gaps but achievable with effort"
+            else:
+                experience_match = "Limited - Significant skill development needed"
+            
+            enhanced_job['ai_reasoning'] = {
+                "score": match_score,
+                "resume_complexity": resume_complexity,
+                "complexity_score": match_score,
+                "experience_match": experience_match,
+                "skill_match_count": len(skill_matches),
+                "reasoning": score_data.get('reasoning', ''),
+                "red_flags": score_data.get('red_flags', []),
+                "skill_matches": skill_matches,
+                "skill_gaps": skill_gaps
+            }
+            
+            # Ensure we always have meaningful skill data for display
+            if not enhanced_job['ai_reasoning']['skill_matches']:
+                enhanced_job['ai_reasoning']['skill_matches'] = []
+            if not enhanced_job['ai_reasoning']['skill_gaps']:
+                enhanced_job['ai_reasoning']['skill_gaps'] = []
+            
+            # Create rich match description
+            enhanced_job['match_description'] = create_rich_match_description(
+                original_job, score_data, enhanced_job['ai_reasoning']
+            )
+            
+            enhanced_jobs.append(enhanced_job)
+    
+    # Sort by match score
+    enhanced_jobs.sort(key=lambda x: x['match_score'], reverse=True)
+    
+    return enhanced_jobs
+
+def create_rich_match_description(job, score_data, ai_reasoning):
+    """
+    Create rich, detailed match description from LLM analysis.
+    """
+    company = job.get('company', 'Unknown Company')
+    title = job.get('title', 'Unknown Position')
+    location = job.get('location', 'Location not specified')
+    score = score_data.get('match_score', 0)
+    reasoning = score_data.get('reasoning', '')
+    skill_matches = score_data.get('skill_matches', [])
+    skill_gaps = score_data.get('skill_gaps', [])
+    red_flags = score_data.get('red_flags', [])
+    
+    # Create opening based on score
+    if score >= 80:
+        opening = f"🎯 **{company}** - Excellent match! This {title} position is highly recommended for your profile."
+    elif score >= 60:
+        opening = f"✅ **{company}** - Strong fit! This {title} role aligns well with your background."
+    elif score >= 40:
+        opening = f"⚠️ **{company}** - Moderate match. This {title} position has potential but some gaps."
+    else:
+        opening = f"📊 **{company}** - Limited fit. This {title} role may not be ideal for your current profile."
+    
+    # Add AI reasoning
+    ai_section = f"\n\n**🤖 AI Analysis:** {reasoning}"
+    
+    # Add skill analysis
+    skill_section = f"\n\n**🎯 Skill Analysis:**"
+    if skill_matches:
+        skill_section += f"\n- ✅ **Your matching skills:** {', '.join(skill_matches)}"
+    if skill_gaps:
+        skill_section += f"\n- 📚 **Skills to develop:** {', '.join(skill_gaps[:3])}"
+        if len(skill_gaps) > 3:
+            skill_section += f" (+{len(skill_gaps) - 3} more)"
+    
+    # Add red flags if any
+    red_flag_section = ""
+    if red_flags:
+        red_flag_section = f"\n\n**⚠️ Considerations:**"
+        for flag in red_flags[:2]:  # Limit to 2 red flags
+            red_flag_section += f"\n- {flag}"
+    
+    # Add location
+    location_section = f"\n\n**📍 Location:** {location}"
+    
+    # Add final score
+    score_section = f"\n\n**🎯 Match Score: {score}/100**"
+    if score >= 70:
+        score_section += " - **Highly Recommended**"
+    elif score >= 40:
+        score_section += " - **Worth Considering**"
+    else:
+        score_section += " - **May Not Be Ideal**"
+    
+    return opening + ai_section + skill_section + red_flag_section + location_section + score_section
+
 def match_resume_to_jobs(resume_skills, jobs, resume_text=""):
     """
-    Two-stage intelligent job matching:
-    1. Fast pre-filtering to get top 30 candidates (no LLM calls)
-    2. LLM deep analysis to rank and return top 10
+    Ultra-efficient 3-stage job matching with single LLM call.
+    Stage 1: Pre-filter jobs (free, fast)
+    Stage 2: Batch LLM analysis (single call)
+    Stage 3: Enhanced results
     """
     if not jobs:
         return []
     
-    print(f"🎯 Starting two-stage matching with {len(jobs)} jobs and {len(resume_skills)} resume skills")
+    print(f"🎯 Starting efficient 3-stage matching with {len(jobs)} jobs and {len(resume_skills)} resume skills")
+    
+    # Extract resume metadata for filtering (should already be available from parse_resume)
+    resume_metadata = {
+        'experience_level': extract_user_experience_level(resume_skills, resume_text),
+        'years_of_experience': 0,  # Default for now, could be extracted
+        'is_student': True  # Default assumption for internships
+    }
+    
+    # STAGE 1: Intelligent Pre-filtering (FREE, <1 second)
+    print("🔍 Stage 1: Pre-filtering jobs with intelligent criteria...")
+    filtered_jobs = intelligent_prefilter_jobs(jobs, resume_skills, resume_metadata, target_count=50)
+    
+    if not filtered_jobs:
+        print("❌ No jobs passed pre-filtering criteria")
+        return []
+    
+    # STAGE 2: Batch LLM Analysis (Single LLM call, ~$0.08-0.15)
+    print("🤖 Stage 2: Comprehensive batch LLM analysis...")
+    llm_scores = batch_analyze_jobs_with_llm(filtered_jobs, resume_skills, resume_text, resume_metadata)
+    
+    if not llm_scores:
+        print("❌ LLM analysis failed, using fallback")
+        # Fallback to legacy approach
+        return match_resume_to_jobs_legacy(resume_skills, filtered_jobs[:20], resume_text)
+    
+    # STAGE 3: Enhanced Results Processing
+    print("✨ Stage 3: Enhancing results with rich descriptions...")
+    enhanced_jobs = enhance_batch_results(llm_scores, filtered_jobs, resume_skills)
+    
+    # Quality assurance
+    unique_scores = len(set([job['match_score'] for job in enhanced_jobs]))
+    total_jobs = len(enhanced_jobs)
+    diversity_ratio = unique_scores / total_jobs if total_jobs > 0 else 0
+    
+    print(f"✅ Efficient matching complete: {len(enhanced_jobs)} jobs analyzed")
+    print(f"📊 Score diversity: {unique_scores} unique scores out of {total_jobs} jobs ({diversity_ratio:.1%})")
+    print(f"💰 Cost: Single LLM call (~$0.08-0.15) vs {len(jobs)} individual calls (~${len(jobs) * 0.02:.2f})")
+    
+    return enhanced_jobs
+
+def match_resume_to_jobs_legacy_fallback(resume_skills, jobs, resume_text=""):
+    """
+    Ultra-efficient 3-stage job matching with single LLM call - LEGACY VERSION.
+    This is the old expensive approach kept for fallback.
+    Uses intelligent prefiltering before LLM analysis.
+    """
+    if not jobs:
+        return []
+    
+    print(f"⚠️ Using legacy expensive matching with {len(jobs)} jobs and {len(resume_skills)} resume skills")
+    
+    # Extract resume metadata for filtering
+    resume_metadata = {
+        'experience_level': extract_user_experience_level(resume_skills, resume_text),
+        'years_of_experience': 0,
+        'is_student': True
+    }
+    
+    # STAGE 0: Intelligent Pre-filtering (to reduce LLM costs)
+    print("🔍 Stage 0: Pre-filtering jobs with intelligent criteria...")
+    filtered_jobs = intelligent_prefilter_jobs(jobs, resume_skills, resume_metadata, target_count=50)
+    
+    if not filtered_jobs:
+        print("❌ No jobs passed pre-filtering criteria")
+        return []
+    
+    print(f"✅ Pre-filtered to {len(filtered_jobs)} jobs from {len(jobs)} total")
     
     # Stage 1: Analyze candidate profile once (cached)
     from matching.llm_skill_extractor import analyze_candidate_profile_with_llm
     
     print("🧠 Stage 1: Analyzing candidate profile...")
-    candidate_profile = analyze_candidate_profile_with_llm(resume_skills, resume_text)
+    try:
+        candidate_profile = analyze_candidate_profile_with_llm(resume_skills, resume_text)
+    except:
+        print("❌ Candidate profile analysis failed, continuing without it")
+        candidate_profile = None
     
-    # Stage 2: Fast pre-filtering using basic scoring (NO expensive LLM calls per job)
-    print("⚡ Stage 2: Fast pre-filtering jobs...")
+    # Stage 2: Intelligent LLM-based scoring with resume complexity analysis
+    print("🤖 Stage 2: Intelligent resume-based scoring (analyzing complexity)...")
     matched_jobs = []
     
-    for i, job in enumerate(jobs):
-        if i % 100 == 0:  # Progress indicator for large datasets
-            print(f"   Processing job {i+1}/{len(jobs)}")
+    for i, job in enumerate(filtered_jobs):
+        if i % 10 == 0:  # Progress indicator (every 10 jobs since we're using LLM)
+            print(f"   Processing job {i+1}/{len(filtered_jobs)}")
         
-        # Use fast scoring instead of full match_job_to_resume
-        score = fast_job_score(job, resume_skills)
+        # Use intelligent LLM-based scoring that heavily weights resume complexity
+        llm_analysis = intelligent_resume_based_scoring(job, resume_skills, resume_text)
+        score = llm_analysis["score"]
         
-        # Only include jobs with non-zero scores for efficiency
-        if score > 0:
-            job_with_score = job.copy()
-            job_with_score['match_score'] = score
-            job_with_score['match_description'] = f"Pre-filtered match (score: {score})"
-            matched_jobs.append(job_with_score)
+        # Generate rich description from LLM analysis data instead of calling legacy matcher
+        detailed_description = generate_llm_based_description(job, llm_analysis, resume_skills)
+        
+        # Include ALL jobs with their scores and enhanced data
+        job_with_score = job.copy()
+        job_with_score['match_score'] = score
+        job_with_score['ai_reasoning'] = llm_analysis
+        job_with_score['match_description'] = detailed_description  # Rich LLM-based description
+        matched_jobs.append(job_with_score)
     
-    # Sort by match score and take top 30
+    # Sort by match score (highest first)
     matched_jobs.sort(key=lambda x: x['match_score'], reverse=True)
-    top_30_jobs = matched_jobs[:30]
     
-    print(f"⚡ Pre-filtering complete: {len(matched_jobs)} matches found, analyzing top {len(top_30_jobs)}")
+    print(f"✅ Legacy matching complete: Returning all {len(matched_jobs)} jobs with scores")
+    print(f"📊 Score distribution: {len([j for j in matched_jobs if j['match_score'] > 0])} jobs with score > 0")
     
-    if not top_30_jobs:
-        print("❌ No matching jobs found in pre-filtering stage")
-        return []
-    
-    # Stage 3: LLM deep ranking of top 30 to get best 10
-    print("🤖 Stage 3: Deep LLM analysis and ranking...")
-    from matching.llm_skill_extractor import llm_deep_ranking
-    
-    try:
-        final_ranked_jobs = llm_deep_ranking(candidate_profile, top_30_jobs)
-        
-        if final_ranked_jobs:
-            print(f"✅ Two-stage matching complete: Returning {len(final_ranked_jobs)} intelligently ranked jobs")
-            return final_ranked_jobs
-        else:
-            print("⚠️ LLM ranking failed, falling back to score-based top 10")
-            return top_30_jobs[:10]
-            
-    except Exception as e:
-        print(f"❌ Error in deep ranking: {e}")
-        print("🔄 Falling back to fast matching results")
-        return top_30_jobs[:10]
+    return matched_jobs
 
 def match_resume_to_jobs_legacy(resume_skills, jobs, resume_text=""):
     """
     LEGACY: Original one-stage matching for comparison/fallback.
-    Match resume skills to a list of jobs and return the best matches.
+    Uses intelligent prefiltering before matching.
     Returns a list of jobs sorted by match score.
     """
-    matched_jobs = []
+    if not jobs:
+        return []
     
     print(f"🎯 Starting legacy matching process with {len(jobs)} jobs and {len(resume_skills)} resume skills")
     
-    for i, job in enumerate(jobs):
-        print(f"🔍 Matching job {i+1}/{len(jobs)}: {job.get('company', 'Unknown')} - {job.get('title', 'Unknown')}")
+    # Extract resume metadata for filtering
+    resume_metadata = {
+        'experience_level': extract_user_experience_level(resume_skills, resume_text),
+        'years_of_experience': 0,
+        'is_student': True
+    }
+    
+    # STAGE 1: Intelligent Pre-filtering (even for legacy mode)
+    print("🔍 Stage 1: Pre-filtering jobs with intelligent criteria...")
+    filtered_jobs = intelligent_prefilter_jobs(jobs, resume_skills, resume_metadata, target_count=50)
+    
+    if not filtered_jobs:
+        print("❌ No jobs passed pre-filtering criteria")
+        return []
+    
+    print(f"✅ Pre-filtered to {len(filtered_jobs)} jobs from {len(jobs)} total")
+    
+    # STAGE 2: Match each prefiltered job
+    matched_jobs = []
+    
+    for i, job in enumerate(filtered_jobs):
+        print(f"🔍 Matching job {i+1}/{len(filtered_jobs)}: {job.get('company', 'Unknown')} - {job.get('title', 'Unknown')}")
         
         score, description = match_job_to_resume(job, resume_skills, resume_text)
         
@@ -410,8 +1213,8 @@ def match_resume_to_jobs_legacy(resume_skills, jobs, resume_text=""):
     
     print(f"🎯 Legacy matching complete: {len(matched_jobs)} total jobs, {len([j for j in matched_jobs if j['match_score'] > 0])} with score > 0")
     
-    # Return all jobs (not just matches) so we can see scores
-    return matched_jobs[:10]
+    # Return all jobs with scores for pagination and filtering
+    return matched_jobs
 
 # resume for user ready to pass to LLM
 #  get profile for user
