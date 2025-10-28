@@ -7,7 +7,7 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Progress } from '../components/ui/progress';
-import { Upload, FileCheck, AlertCircle, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Upload, FileCheck, AlertCircle, Sparkles, CheckCircle2, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 const HomePage: React.FC = () => {
@@ -20,7 +20,13 @@ const HomePage: React.FC = () => {
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState('');
   const [useStreaming, setUseStreaming] = useState(true);
+  const [thinkDeeper, setThinkDeeper] = useState(true);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  
+  // Pagination and filtering state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'recent'>('desc'); // desc = highest first, asc = lowest first, recent = most recent
+  const itemsPerPage = 10;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -42,6 +48,7 @@ const HomePage: React.FC = () => {
     try {
       const formData = new FormData();
       formData.append('resume', file);
+      formData.append('think_deeper', thinkDeeper.toString());
 
       const response = await fetch('/api/match-stream', {
         method: 'POST',
@@ -139,6 +146,50 @@ const HomePage: React.FC = () => {
     }
   };
 
+  // Reset pagination when new results come in
+  React.useEffect(() => {
+    if (jobs.length > 0) {
+      setCurrentPage(1);
+    }
+  }, [jobs.length]);
+
+  // Sorting and pagination logic
+  const sortedJobs = React.useMemo(() => {
+    const sorted = [...jobs].sort((a, b) => {
+      if (sortOrder === 'recent') {
+        // Sort by first_seen timestamp (most recent first)
+        const dateA = a.first_seen ? new Date(a.first_seen).getTime() : 0;
+        const dateB = b.first_seen ? new Date(b.first_seen).getTime() : 0;
+        return dateB - dateA; // Newest first
+      } else {
+        // Sort by match score
+        const scoreA = a.match_score || a.score || 0;
+        const scoreB = b.match_score || b.score || 0;
+        return sortOrder === 'desc' ? scoreB - scoreA : scoreA - scoreB;
+      }
+    });
+    return sorted;
+  }, [jobs, sortOrder]);
+
+  const totalPages = Math.ceil(sortedJobs.length / itemsPerPage);
+  
+  const currentPageJobs = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return sortedJobs.slice(startIndex, endIndex);
+  }, [sortedJobs, currentPage, itemsPerPage]);
+
+  const handleSortChange = (newOrder: 'desc' | 'asc' | 'recent') => {
+    setSortOrder(newOrder);
+    setCurrentPage(1); // Reset to first page when sorting changes
+  };
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    // Scroll to top of results when page changes
+    document.getElementById('results-section')?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -195,17 +246,31 @@ const HomePage: React.FC = () => {
                   />
                 </label>
 
-                <div className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    id="streaming"
-                    checked={useStreaming}
-                    onChange={(e) => setUseStreaming(e.target.checked)}
-                    className="rounded border-gray-300"
-                  />
-                  <label htmlFor="streaming" className="text-sm text-muted-foreground cursor-pointer">
-                    Real-time progress updates
-                  </label>
+                <div className="flex flex-col gap-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="thinkDeeper"
+                      checked={thinkDeeper}
+                      onChange={(e) => setThinkDeeper(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    <label htmlFor="thinkDeeper" className="text-sm text-muted-foreground cursor-pointer">
+                      Think Deeper (AI-powered analysis)
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="streaming"
+                      checked={useStreaming}
+                      onChange={(e) => setUseStreaming(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    <label htmlFor="streaming" className="text-sm text-muted-foreground cursor-pointer">
+                      Real-time progress updates
+                    </label>
+                  </div>
                 </div>
 
                 <Button 
@@ -281,6 +346,54 @@ const HomePage: React.FC = () => {
           </Card>
         )}
 
+        {/* Filter Controls */}
+        {hasResults && jobs.length > 0 && (
+          <Card className="max-w-4xl mx-auto">
+            <CardContent className="pt-6">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">Sort by:</span>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={sortOrder === 'desc' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => handleSortChange('desc')}
+                      className="flex items-center gap-2"
+                    >
+                      <ArrowDown className="h-4 w-4" />
+                      Highest Match
+                    </Button>
+                    <Button
+                      variant={sortOrder === 'asc' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => handleSortChange('asc')}
+                      className="flex items-center gap-2"
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                      Lowest Match
+                    </Button>
+                    <Button
+                      variant={sortOrder === 'recent' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => handleSortChange('recent')}
+                      className="flex items-center gap-2"
+                    >
+                      <Clock className="h-4 w-4" />
+                      Most Recent
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span>
+                    Showing {Math.min((currentPage - 1) * itemsPerPage + 1, sortedJobs.length)}-
+                    {Math.min(currentPage * itemsPerPage, sortedJobs.length)} of {sortedJobs.length} results
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Debug Section - Remove in production */}
         {process.env.NODE_ENV === 'development' && (jobs.length > 0 || hasResults) && (
           <Card className="max-w-4xl mx-auto bg-muted/50">
@@ -311,7 +424,7 @@ const HomePage: React.FC = () => {
 
         {/* Results Section */}
         {hasResults && (
-          <div className="space-y-6">
+          <div className="space-y-6" id="results-section">
             <div className="text-center">
               <h2 className="text-3xl font-bold">
                 {jobs.length > 0 ? `Found ${jobs.length} Matching Opportunities` : 'No Matches Found'}
@@ -326,7 +439,7 @@ const HomePage: React.FC = () => {
                     Intelligent Matching
                   </Badge>
                   <Badge variant="outline" className="px-3 py-1">
-                    Top {jobs.length} Results
+                    All {jobs.length} Results
                   </Badge>
                 </div>
               )}
@@ -334,9 +447,9 @@ const HomePage: React.FC = () => {
             
             <div className="grid gap-6 max-w-4xl mx-auto">
               {jobs.length > 0 ? (
-                jobs.map((job, index) => (
+                currentPageJobs.map((job, index) => (
                   <JobCard 
-                    key={`${job.company}-${job.title}-${index}`} 
+                    key={`${job.company}-${job.title}-${(currentPage - 1) * itemsPerPage + index}`} 
                     job={job} 
                     isNewResult={isLoading && useStreaming}
                   />
@@ -354,6 +467,70 @@ const HomePage: React.FC = () => {
                 </Card>
               )}
             </div>
+            
+            {/* Pagination Controls */}
+            {jobs.length > itemsPerPage && (
+              <Card className="max-w-4xl mx-auto">
+                <CardContent className="pt-6">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePageChange(currentPage - 1)}
+                        disabled={currentPage === 1}
+                        className="flex items-center gap-2"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                        Previous
+                      </Button>
+                      
+                      <div className="flex items-center gap-1">
+                        {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                          let pageNum: number;
+                          if (totalPages <= 5) {
+                            pageNum = i + 1;
+                          } else if (currentPage <= 3) {
+                            pageNum = i + 1;
+                          } else if (currentPage >= totalPages - 2) {
+                            pageNum = totalPages - 4 + i;
+                          } else {
+                            pageNum = currentPage - 2 + i;
+                          }
+                          
+                          return (
+                            <Button
+                              key={pageNum}
+                              variant={currentPage === pageNum ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => handlePageChange(pageNum)}
+                              className="w-10 h-10"
+                            >
+                              {pageNum}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePageChange(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                        className="flex items-center gap-2"
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    <div className="text-sm text-muted-foreground">
+                      Page {currentPage} of {totalPages}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
       </main>

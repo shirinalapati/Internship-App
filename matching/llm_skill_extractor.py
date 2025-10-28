@@ -18,7 +18,7 @@ _job_skills_cache = {}
 
 def extract_job_skills_with_llm(job_title: str, job_description: str, company: str = "") -> List[str]:
     """
-    Use GPT-4o to dynamically extract required skills from job postings.
+    Use GPT-5 to dynamically extract required skills from job postings.
     This replaces all hardcoded skill lists with intelligent extraction.
     Includes caching to prevent timeouts.
     """
@@ -74,7 +74,7 @@ Description: {job_description}
 """
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",
             messages=[
                 {
                     "role": "system",
@@ -237,7 +237,7 @@ Are equivalent: true if they should be considered the same skill for job matchin
 """
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Use mini for faster/cheaper similarity checks
+            model="gpt-5",  # Use mini for faster/cheaper similarity checks
             messages=[
                 {
                     "role": "system",
@@ -386,7 +386,7 @@ Description: {job_description}
 """
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",
             messages=[
                 {
                     "role": "system",
@@ -468,7 +468,7 @@ Return JSON:
 """
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",
             messages=[
                 {
                     "role": "system",
@@ -573,7 +573,7 @@ Focus on COMPATIBILITY and GROWTH, not just skill matching.
 """
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5",
             messages=[
                 {
                     "role": "system",
