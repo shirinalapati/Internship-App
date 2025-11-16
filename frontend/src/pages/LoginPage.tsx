@@ -58,7 +58,6 @@ const LoginPage: React.FC<LoginPageProps> = ({ error }) => {
         <ul>
           <li>Personalized internship recommendations</li>
           <li>Resume-based skill matching</li>
-          <li>Real-time job scraping</li>
           <li>Match score calculations</li>
           <li>Application tracking</li>
         </ul>

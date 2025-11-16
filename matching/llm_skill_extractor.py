@@ -214,26 +214,118 @@ def calculate_skill_similarity(skill1: str, skill2: str) -> float:
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
         prompt = f"""
-Compare these two technical skills and determine if they represent the same or very similar capabilities:
+You are an expert skill-matching system that compares two technical skills and determines how closely related they are.
 
-Skill 1: "{skill1}"
+Your goal: evaluate whether these skills represent the *same*, *similar*, or *different* capabilities in a technical or professional context.
+
+---
+
+### Input
+Skill 1: "{skill1}"  
 Skill 2: "{skill2}"
 
-Consider:
-- Are they the same technology with different names? (e.g., "JS" vs "JavaScript")
-- Are they closely related technologies? (e.g., "React" vs "ReactJS")
-- Are they different versions of the same thing? (e.g., "Python" vs "Python3")
-- Are they part of the same ecosystem? (e.g., "MySQL" vs "SQL")
+---
 
-Return a JSON object:
+### Step-by-step reasoning guidelines
+1. **Direct Synonyms / Aliases**
+   - Example: "JS" vs "JavaScript" → identical
+   - Example: "Node" vs "Node.js" → identical
+   - Example: "PostgreSQL" vs "Postgres" → identical
+
+2. **Closely Related Variants (within same technology)**
+   - Example: "React" vs "ReactJS" → same framework
+   - Example: "TensorFlow" vs "TensorFlow 2" → different versions
+   - Example: "Python" vs "Python3" → version update
+   - Example: "C++" vs "C" → not equivalent, but related language lineage
+
+3. **Ecosystem Relationships**
+   - Example: "MySQL" vs "SQL" → related (SQL is the language, MySQL is an implementation)
+   - Example: "AWS Lambda" vs "Amazon Web Services" → part of same ecosystem, not equivalent
+   - Example: "Pandas" vs "NumPy" → complementary but distinct libraries in Python
+
+4. **Different / Unrelated Technologies**
+   - Example: "Java" vs "JavaScript" → completely different
+   - Example: "React" vs "Vue" → both frontend frameworks, but different technologies
+   - Example: "Excel" vs "Python" → unrelated tools
+   - Example: "Kubernetes" vs "Docker" → often used together, but distinct functions
+
+5. **Domain Context**
+   - If both are from the same *domain* (e.g., cloud, frontend, data science), reflect that in reasoning even if they aren’t equivalent.
+
+---
+
+### Output Format
+Return a JSON object only:
 {{
-    "similarity_score": 0.95,
-    "are_equivalent": true,
-    "reasoning": "Brief explanation"
+  "similarity_score": <float between 0.0 and 1.0>,
+  "are_equivalent": <true|false>,
+  "category": "<'identical' | 'similar' | 'related' | 'different'>",
+  "reasoning": "<brief but precise explanation of relationship>"
 }}
 
-Similarity score: 0.0 (completely different) to 1.0 (identical/equivalent)
-Are equivalent: true if they should be considered the same skill for job matching
+### Examples
+
+**Example 1**
+Skill 1: "JS"
+Skill 2: "JavaScript"
+Output:
+{{
+  "similarity_score": 1.0,
+  "are_equivalent": true,
+  "category": "identical",
+  "reasoning": "JS is a common abbreviation for JavaScript; they are the same language."
+}}
+
+**Example 2**
+Skill 1: "Python"
+Skill 2: "Python3"
+Output:
+{{
+  "similarity_score": 0.95,
+  "are_equivalent": true,
+  "category": "identical",
+  "reasoning": "Python3 is a version of Python; both indicate the same core skill."
+}}
+
+**Example 3**
+Skill 1: "MySQL"
+Skill 2: "SQL"
+Output:
+{{
+  "similarity_score": 0.7,
+  "are_equivalent": false,
+  "category": "related",
+  "reasoning": "SQL is the language; MySQL is a database that uses it."
+}}
+
+**Example 4**
+Skill 1: "Java"
+Skill 2: "JavaScript"
+Output:
+{{
+  "similarity_score": 0.1,
+  "are_equivalent": false,
+  "category": "different",
+  "reasoning": "Despite similar names, they are unrelated languages."
+}}
+
+**Example 5**
+Skill 1: "AWS Lambda"
+Skill 2: "Amazon Web Services"
+Output:
+{{
+  "similarity_score": 0.6,
+  "are_equivalent": false,
+  "category": "related",
+  "reasoning": "AWS Lambda is a compute service within the AWS ecosystem."
+}}
+
+---
+
+### Evaluation Criteria
+- Focus on *functional similarity* — whether someone with one skill likely possesses the other.
+- Give conservative equivalence: only mark `are_equivalent=true` if they clearly represent the same capability.
+- Prefer short, factual reasoning (≤ 25 words).
 """
 
         response = client.chat.completions.create(

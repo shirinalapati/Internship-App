@@ -361,79 +361,182 @@ def intelligent_resume_based_scoring(job, resume_skills, resume_text=""):
         job_skills = job.get("required_skills", [])
         
         # Create comprehensive prompt for intelligent matching
-        prompt = f"""You are an expert career advisor and resume analyst. Analyze this candidate's resume against this job opportunity.
+        prompt = f"""
+You are an expert **career advisor and technical resume analyst**. Your task is to evaluate how well a candidate’s resume matches a specific job opportunity.
 
-CANDIDATE RESUME ANALYSIS:
-Resume Skills: {resume_skills}
-Full Resume Text: {resume_text[:2000]}  # Limit for token efficiency
+You must output a structured JSON assessment that is **precise, consistent, and parsable**.
 
-JOB OPPORTUNITY:
-Company: {job_company}
-Title: {job_title}
-Location: {job_location}
-Description: {job_description[:1000]}
-Required Skills: {job_skills}
+---
 
-YOUR TASK - ANALYZE AND SCORE (0-100):
+## INPUT
 
-1. **RESUME COMPLEXITY ANALYSIS (40% weight - MOST IMPORTANT)**:
-   - Evaluate resume sophistication and depth
-   - Consider: project complexity, work experience quality, technical depth, problem-solving demonstrated
-   - Indicators of ADVANCED resume:
-     * Multiple substantial projects with technical details
-     * Work experience at known companies
-     * Leadership roles, mentoring, or teaching experience
-     * Research papers, publications, or open source contributions
-     * Advanced coursework or specializations
-     * Awards, competitions, or recognition
-     * Deep technical implementations (not just "used React")
-   - Indicators of BEGINNER resume:
-     * Minimal work experience or only academic projects
-     * Basic coursework projects
-     * Surface-level skill mentions
-     * No demonstrated depth in any technology
-     * Limited context or details
-   
-   Rate complexity: ADVANCED (80-100), INTERMEDIATE (50-79), BEGINNER (0-49)
+**CANDIDATE RESUME**
+- Skills: {resume_skills}
+- Text (truncated to first 2000 chars): {resume_text[:2000]}
 
-2. **EXPERIENCE LEVEL MATCHING (30% weight)**:
-   - Is this job appropriate for the candidate's level?
-   - CRITICAL: If job requires "senior", "lead", "5+ years", "10+ years", "architect", "principal", "manager"
-     AND candidate is BEGINNER/INTERMEDIATE → Score = 0 (immediate disqualification)
-   - Match entry-level candidates with entry-level/intern roles
-   - Match advanced candidates with appropriate challenging roles
+**JOB OPPORTUNITY**
+- Company: {job_company}
+- Title: {job_title}
+- Location: {job_location}
+- Description (truncated to first 1000 chars): {job_description[:1000]}
+- Required Skills: {job_skills}
 
-3. **SKILL ALIGNMENT (20% weight)**:
-   - How many required skills does the candidate actually possess?
-   - Quality of skill match (demonstrated experience vs just mentioned)
-   - Require minimum 2 matching skills or score = 0
+---
 
-4. **CAREER FIT (10% weight)**:
-   - Does this job align with the candidate's trajectory?
-   - Would this be a good next step for their career?
+## EVALUATION FRAMEWORK
 
-SCORING RULES:
-- Return 0 if:
-  * Job requires senior/experienced level and candidate is beginner
-  * Job requires 5+ years and resume shows < 2 years
-  * Less than 2 matching skills
-  * Job is clearly misaligned with candidate level
-- Return 1-40 for poor matches (not recommended)
-- Return 41-70 for acceptable matches (reasonable fit)
-- Return 71-100 for excellent matches (strong recommendation)
+You will assign a **final score (0–100)** using the following weighted components:
 
-**HEAVY EMPHASIS**: Resume complexity should be the PRIMARY factor. An advanced candidate with a sophisticated resume should NOT match entry-level positions, and a beginner should NOT match senior roles.
+### 1. RESUME COMPLEXITY (40% weight — MOST IMPORTANT)
+Evaluate the candidate’s technical and experiential sophistication.
 
-Return JSON:
+**Advanced Resume (80–100 range):**
+- Multiple technically complex projects (e.g., AI agents, distributed systems, production-grade apps)
+- Work at reputable companies, startups, or internships
+- Leadership, mentorship, or technical ownership experience
+- Published research or open-source contributions
+- Awards, hackathon wins, or recognized achievements
+- Demonstrated depth (e.g., “Implemented Flask API with caching + CI/CD pipeline,” not just “used Flask”)
+
+**Intermediate Resume (50–79 range):**
+- Some real-world experience or strong personal projects
+- Decent technical coverage but lacking in depth or complexity
+- Limited leadership or research exposure
+
+**Beginner Resume (0–49 range):**
+- Only academic projects or class assignments
+- Minimal or no professional experience
+- Vague skill descriptions without technical detail
+- Generic language: “Used JavaScript for websites” with no measurable output
+
+---
+
+### 2. EXPERIENCE LEVEL MATCHING (30% weight)
+Determine if the job level matches the candidate’s level.
+
+**Rules:**
+- If job includes “senior”, “lead”, “principal”, “architect”, “manager”, “5+ years”, or “10+ years”
+  AND candidate is BEGINNER or INTERMEDIATE → **Immediate disqualification (score 0)**
+- Entry-level candidates → good match for intern/entry roles
+- Advanced candidates → poor match for entry-level roles
+- Aim for “calibrated fit”: the job should challenge but not exceed or undershoot the resume’s demonstrated level.
+
+---
+
+### 3. SKILL ALIGNMENT (20% weight)
+Compare required job skills with resume skills.
+
+**Evaluation criteria:**
+- Count how many required skills are present AND demonstrated (not just listed)
+- 0–1 overlapping skills → score 0
+- 2–3 overlapping skills → acceptable (50–70)
+- 4+ well-demonstrated skills → strong alignment (80–100)
+- Consider relevance (e.g., “React” matches “ReactJS” but not “Vue”)
+
+---
+
+### 4. CAREER FIT (10% weight)
+Assess whether the role aligns with the candidate’s next logical step:
+- Does this job advance their current trajectory?
+- Is it in the same or a natural evolution of their domain?
+- Would this role reasonably leverage and expand their current skills?
+
+---
+
+## SCORING RULES
+
+| Situation | Action |
+|------------|---------|
+| Senior-level job + beginner resume | **Return 0 (disqualified)** |
+| Job requires 5+ years, resume < 2 years | **Return 0 (disqualified)** |
+| <2 required skills matched | **Return 0 (disqualified)** |
+| Role clearly misaligned with candidate level | **Return ≤ 30 (red flag)** |
+| Poor general fit | **Return 1–40 (not recommended)** |
+| Adequate fit | **Return 41–70 (reasonable)** |
+| Excellent alignment | **Return 71–100 (strong recommendation)** |
+
+---
+
+## OUTPUT FORMAT (STRICT JSON ONLY)
+
+Return exactly this structure:
+
 {{
-    "score": 85,
-    "resume_complexity": "ADVANCED/INTERMEDIATE/BEGINNER",
-    "complexity_score": 75,
-    "experience_match": "excellent/good/acceptable/poor/disqualified",
-    "skill_match_count": 5,
-    "reasoning": "Brief 1-2 sentence explanation of the score",
-    "red_flags": ["Any disqualifying factors if score < 40"]
+  "score": <integer 0–100>,
+  "resume_complexity": "<ADVANCED | INTERMEDIATE | BEGINNER>",
+  "complexity_score": <integer 0–100>,
+  "experience_match": "<excellent | good | acceptable | poor | disqualified>",
+  "skill_match_count": <integer>,
+  "reasoning": "<1–3 concise sentences summarizing reasoning>",
+  "red_flags": ["<any disqualifying issues, or empty array if none>"]
 }}
+
+---
+
+## EXAMPLES
+
+**Example 1: Excellent Match**
+- Resume: 2 internships, built AI SaaS project, led hackathon team
+- Job: Junior AI Developer (Python, Flask, ML)
+- Output:
+{{
+  "score": 92,
+  "resume_complexity": "ADVANCED",
+  "complexity_score": 88,
+  "experience_match": "excellent",
+  "skill_match_count": 5,
+  "reasoning": "Strong technical depth, 2 relevant internships, direct Python/Flask/ML experience aligns perfectly.",
+  "red_flags": []
+}}
+
+**Example 2: Poor Match — Overqualified**
+- Resume: Senior backend engineer, 10+ years experience
+- Job: Intern software developer
+- Output:
+{{
+  "score": 25,
+  "resume_complexity": "ADVANCED",
+  "complexity_score": 95,
+  "experience_match": "poor",
+  "skill_match_count": 4,
+  "reasoning": "Candidate far exceeds role requirements; this position is below their demonstrated level.",
+  "red_flags": ["Overqualified for position"]
+}}
+
+**Example 3: Disqualified — Lacks Skill Alignment**
+- Resume: Web designer with HTML/CSS
+- Job: Backend Engineer (Java, SQL, Spring Boot)
+- Output:
+{{
+  "score": 0,
+  "resume_complexity": "INTERMEDIATE",
+  "complexity_score": 60,
+  "experience_match": "disqualified",
+  "skill_match_count": 0,
+  "reasoning": "No overlap in required backend technologies; lacks Java or SQL experience.",
+  "red_flags": ["Missing required skills"]
+}}
+
+**Example 4: Acceptable — Beginner for Entry Role**
+- Resume: 2 university projects (React, Node.js)
+- Job: Frontend Intern (React, HTML, CSS)
+- Output:
+{{
+  "score": 68,
+  "resume_complexity": "BEGINNER",
+  "complexity_score": 45,
+  "experience_match": "good",
+  "skill_match_count": 3,
+  "reasoning": "Beginner-level candidate matches well for entry-level React internship.",
+  "red_flags": []
+}}
+
+---
+
+## NOTES
+- Keep reasoning concise and factual (avoid opinions or restating data).
+- Use conservative scoring — reward clear depth, penalize vagueness.
+- Never include non-JSON text in output.
 """
 
         response = client.chat.completions.create(

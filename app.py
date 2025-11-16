@@ -10,6 +10,8 @@ import uvicorn
 from dotenv import load_dotenv
 import io
 import json
+import asyncio
+from datetime import datetime
 
 # Import our modules
 from resume_parser import parse_resume, is_valid_resume
@@ -49,27 +51,65 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 @app.on_event("startup")
 async def startup_event():
     """Initialize hybrid Redis + Database cache system on server startup"""
-    print("🚀 Starting up Internship Matcher with Hybrid Cache System...")
-    
+    environment = os.getenv("ENVIRONMENT", "development").lower()
+    print(f"🚀 Starting up Internship Matcher [{environment.upper()}] with Hybrid Cache System...")
+
     # Initialize hybrid cache (Redis + Database)
     cache_available = job_cache.init_redis()
-    
+
     if cache_available:
         # Check cache status
         cache_info = job_cache.get_cache_info()
-        
+
         # Try to get cached jobs
         cached_jobs = job_cache.get_cached_jobs()
-        
-        if cached_jobs:
-            print(f"📦 Using existing cache: {len(cached_jobs)} jobs available")
-            print(f"🔍 Cache status: {cache_info.get('hybrid', {}).get('message', 'Unknown')}")
+
+        # Determine if we should refresh cache on startup
+        should_refresh = False
+
+        if environment == "development":
+            # In development: check if cache needs refresh (older than 6 hours)
+            if cached_jobs:
+                db_info = cache_info.get('database', {})
+                last_update = db_info.get('last_update')
+
+                if last_update:
+                    # Parse last update time and check if it's stale
+                    from datetime import datetime, timedelta
+                    try:
+                        last_update_time = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+                        time_since_update = datetime.now(last_update_time.tzinfo) - last_update_time
+
+                        # Refresh if cache is older than 6 hours in dev
+                        if time_since_update > timedelta(hours=6):
+                            print(f"🔄 Cache is {time_since_update.total_seconds() / 3600:.1f} hours old - refreshing...")
+                            should_refresh = True
+                        else:
+                            print(f"📦 Using existing cache: {len(cached_jobs)} jobs (updated {time_since_update.total_seconds() / 3600:.1f} hours ago)")
+                    except Exception as e:
+                        print(f"⚠️ Error parsing cache timestamp: {e}")
+                        should_refresh = False
+                else:
+                    print(f"📦 Using existing cache: {len(cached_jobs)} jobs available")
+            else:
+                # No cache - always refresh
+                should_refresh = True
+                print("📥 No cached jobs found - initializing cache...")
         else:
-            # No cached jobs - determine scraping strategy
-            print("📥 No cached jobs found - initializing cache...")
+            # Production: only initialize if cache is empty
+            if cached_jobs:
+                print(f"📦 Using existing cache: {len(cached_jobs)} jobs available")
+                print(f"🔍 Cache status: {cache_info.get('hybrid', {}).get('message', 'Unknown')}")
+            else:
+                should_refresh = True
+                print("📥 No cached jobs found - initializing cache...")
+
+        # Perform cache refresh if needed
+        if should_refresh:
             try:
                 # Use smart scraping (auto-detects incremental vs full)
-                jobs = await scrape_jobs()
+                # Default to 30-day filter to only get recent jobs
+                jobs = await scrape_jobs(max_days_old=30)
                 if jobs:
                     # Store in hybrid cache system
                     cache_result = job_cache.set_cached_jobs(jobs, cache_type='startup')
@@ -98,6 +138,46 @@ async def startup_event():
     
     print("✅ Startup complete!")
 
+    # Start background task for daily cache refresh
+    asyncio.create_task(daily_cache_refresh_task())
+    print("🕒 Daily cache refresh scheduler started")
+
+async def daily_cache_refresh_task():
+    """
+    Background task that automatically refreshes the cache every 24 hours.
+    This ensures jobs stay fresh without manual intervention.
+    """
+    while True:
+        try:
+            # Wait 24 hours before first refresh (cache was just initialized on startup)
+            await asyncio.sleep(24 * 60 * 60)  # 24 hours in seconds
+
+            print(f"🔄 [Scheduled] Starting daily cache refresh at {datetime.utcnow().isoformat()}")
+
+            # Perform smart scraping with 30-day filter
+            jobs = await scrape_jobs(max_days_old=30)
+
+            if jobs:
+                # Store in hybrid cache system
+                cache_result = job_cache.set_cached_jobs(jobs, cache_type='daily_scheduled')
+                new_jobs = cache_result.get('new_jobs', 0)
+                total_jobs = cache_result.get('total_jobs', len(jobs))
+
+                if cache_result.get('database_success') or cache_result.get('redis_success'):
+                    print(f"✅ [Scheduled] Daily refresh complete: {new_jobs} new jobs, {total_jobs} total active jobs")
+                else:
+                    print(f"⚠️ [Scheduled] Cache refresh failed")
+            else:
+                print("📝 [Scheduled] No new jobs found in daily refresh")
+
+        except asyncio.CancelledError:
+            print("🛑 Daily cache refresh task cancelled")
+            break
+        except Exception as e:
+            print(f"❌ [Scheduled] Error in daily cache refresh: {e}")
+            # Continue running even if one refresh fails
+            continue
+
 async def get_jobs_with_cache():
     """
     Get jobs using hybrid cache system (Redis + Database).
@@ -114,7 +194,8 @@ async def get_jobs_with_cache():
     print("🌐 Cache miss - using smart scraping strategy...")
     try:
         # Smart scraping automatically detects incremental vs full
-        jobs = await scrape_jobs()
+        # Default to 30-day filter to only get recent jobs
+        jobs = await scrape_jobs(max_days_old=30)
         
         # Store in hybrid cache system
         if jobs:
@@ -841,13 +922,13 @@ async def test_matching():
         })
 
 @app.post("/api/refresh-cache")
-async def refresh_cache(force_full: bool = False, max_days_old: int = None):
+async def refresh_cache(force_full: bool = False, max_days_old: int = 30):
     """
     Manually refresh the hybrid cache system (admin endpoint)
-    
+
     Args:
         force_full: If True, performs full scrape. If False, uses smart detection
-        max_days_old: Optional filter to only get jobs posted within N days (e.g., 30 for last 30 days)
+        max_days_old: Filter to only get jobs posted within N days (default: 30 days for last month)
     """
     try:
         scrape_type = "full" if force_full else "smart"
@@ -900,12 +981,12 @@ async def refresh_cache(force_full: bool = False, max_days_old: int = None):
         raise HTTPException(status_code=500, detail=f"Cache refresh failed: {str(e)}")
 
 @app.post("/api/refresh-cache-incremental")
-async def refresh_cache_incremental(max_days_old: int = None):
+async def refresh_cache_incremental(max_days_old: int = 30):
     """
     Force incremental cache refresh (only new jobs)
-    
+
     Args:
-        max_days_old: Optional filter to only get jobs posted within N days (e.g., 30 for last 30 days)
+        max_days_old: Filter to only get jobs posted within N days (default: 30 days for last month)
     """
     try:
         date_filter_msg = f" (last {max_days_old} days)" if max_days_old else ""

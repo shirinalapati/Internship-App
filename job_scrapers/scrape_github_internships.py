@@ -1273,7 +1273,7 @@ def parse_internship_table(content, max_results):
         print(f"🔍 [GitHub] Table headers: {headers}")
         
         # Find the date posted column (can have various names)
-        date_keywords = ['date posted', 'posted', 'date added', 'added', 'date']
+        date_keywords = ['date posted', 'posted', 'date added', 'added', 'date', 'age']
         for idx, header in enumerate(headers):
             if any(keyword in header for keyword in date_keywords):
                 date_posted_index = idx

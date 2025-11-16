@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # Redis Cache Server
+  redis:
+    image: redis:7-alpine
+    container_name: internship-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internship-network
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: internship-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=sqlite:///./jobs.db
+    volumes:
+      - ./jobs.db:/app/jobs.db
+      - ./uploads:/app/uploads
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/cache-status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - internship-network
+
+  # Nginx Reverse Proxy + Frontend
+  nginx:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: internship-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro  # For SSL certificates
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - internship-network
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  internship-network:
+    driver: bridge

@@ -10,7 +10,7 @@ import { Progress } from '../components/ui/progress';
 import { Upload, FileCheck, AlertCircle, Sparkles, CheckCircle2, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 import { cn } from '../lib/utils';
 
-const HomePage: React.FC = () => {
+const FindPage: React.FC = () => {
   const user = useUser();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string>('');
@@ -22,7 +22,7 @@ const HomePage: React.FC = () => {
   const [useStreaming, setUseStreaming] = useState(true);
   const [thinkDeeper, setThinkDeeper] = useState(true);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  
+
   // Pagination and filtering state
   const [currentPage, setCurrentPage] = useState(1);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'recent'>('desc'); // desc = highest first, asc = lowest first, recent = most recent
@@ -78,7 +78,7 @@ const HomePage: React.FC = () => {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              
+
               if (data.error) {
                 setError(data.error);
                 setIsLoading(false);
@@ -108,9 +108,9 @@ const HomePage: React.FC = () => {
                 setCurrentStep('Complete!');
                 setProgress(100);
                 setIsLoading(false);
-                
+
                 console.log('🎉 Streaming complete! Final data:', data);
-                
+
                 if (data.final_results && Array.isArray(data.final_results)) {
                   console.log(`📊 Setting ${data.final_results.length} final results:`, data.final_results);
                   setJobs(data.final_results);
@@ -118,7 +118,7 @@ const HomePage: React.FC = () => {
                 } else {
                   console.warn('⚠️ No final_results in completion data:', data);
                 }
-                
+
                 if (data.matches_found === 0) {
                   setError('No matching opportunities found for your skills.');
                 } else if (data.total_results) {
@@ -172,7 +172,7 @@ const HomePage: React.FC = () => {
   }, [jobs, sortOrder]);
 
   const totalPages = Math.ceil(sortedJobs.length / itemsPerPage);
-  
+
   const currentPageJobs = React.useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
@@ -193,12 +193,12 @@ const HomePage: React.FC = () => {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      
+
       <main className="container py-8 space-y-8">
-        {/* Hero Section */}
+        {/* Header Section */}
         <div className="text-center space-y-4">
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight">
-            Find Your Perfect Internship
+            Upload Your Resume
           </h1>
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
             AI-powered matching that analyzes your resume and finds the best opportunities tailored to your skills
@@ -261,8 +261,8 @@ const HomePage: React.FC = () => {
                   </div>
                 </div>
 
-                <Button 
-                  type="submit" 
+                <Button
+                  type="submit"
                   className="w-full md:w-auto px-8"
                   disabled={!selectedFile || isLoading}
                 >
@@ -432,13 +432,13 @@ const HomePage: React.FC = () => {
                 </div>
               )}
             </div>
-            
+
             <div className="grid gap-6 max-w-4xl mx-auto">
               {jobs.length > 0 ? (
                 currentPageJobs.map((job, index) => (
-                  <JobCard 
-                    key={`${job.company}-${job.title}-${(currentPage - 1) * itemsPerPage + index}`} 
-                    job={job} 
+                  <JobCard
+                    key={`${job.company}-${job.title}-${(currentPage - 1) * itemsPerPage + index}`}
+                    job={job}
                     isNewResult={isLoading && useStreaming}
                   />
                 ))
@@ -448,14 +448,14 @@ const HomePage: React.FC = () => {
                     <AlertCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                     <h3 className="text-lg font-semibold mb-2">No Matches Found</h3>
                     <p className="text-muted-foreground">
-                      We couldn't find any internships matching your current skills. 
+                      We couldn't find any internships matching your current skills.
                       Try updating your resume with more technical skills or relevant experience.
                     </p>
                   </CardContent>
                 </Card>
               )}
             </div>
-            
+
             {/* Pagination Controls */}
             {jobs.length > itemsPerPage && (
               <Card className="max-w-4xl mx-auto">
@@ -472,7 +472,7 @@ const HomePage: React.FC = () => {
                         <ChevronLeft className="h-4 w-4" />
                         Previous
                       </Button>
-                      
+
                       <div className="flex items-center gap-1">
                         {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
                           let pageNum: number;
@@ -485,7 +485,7 @@ const HomePage: React.FC = () => {
                           } else {
                             pageNum = currentPage - 2 + i;
                           }
-                          
+
                           return (
                             <Button
                               key={pageNum}
@@ -499,7 +499,7 @@ const HomePage: React.FC = () => {
                           );
                         })}
                       </div>
-                      
+
                       <Button
                         variant="outline"
                         size="sm"
@@ -511,7 +511,7 @@ const HomePage: React.FC = () => {
                         <ChevronRight className="h-4 w-4" />
                       </Button>
                     </div>
-                    
+
                     <div className="text-sm text-muted-foreground">
                       Page {currentPage} of {totalPages}
                     </div>
@@ -526,4 +526,4 @@ const HomePage: React.FC = () => {
   );
 };
 
-export default HomePage;
+export default FindPage;
