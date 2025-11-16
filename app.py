@@ -1,5 +1,7 @@
 import os
 import secrets
+from pathlib import Path
+
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +23,9 @@ from matching.metadata_matcher import extract_resume_metadata
 import job_cache
 from s3_service import upload_resume_to_s3, download_resume_from_s3, delete_resume_from_s3
 
+# Base directory of this file (used for templates/static/uploads paths)
+BASE_DIR = Path(__file__).resolve().parent
+
 # Load environment variables
 load_dotenv()
 
@@ -30,7 +35,12 @@ app = FastAPI(title="Internship Matcher", version="1.0.0")
 # Add CORS middleware for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001", "http://127.0.0.1:3000"],  # React dev server
+    allow_origins=[
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        # add your Vercel frontend here if needed, e.g.:
+        # "https://your-frontend.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,12 +49,12 @@ app.add_middleware(
 # Add session middleware for basic session support
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SECRET_KEY", "your-secret-key-here"))
 
-# Setup templates and static files
-templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Setup templates and static files using absolute paths
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
-# Create upload folder if it doesn't exist
-UPLOAD_FOLDER = "uploads"
+# Create upload folder if it doesn't exist (absolute path)
+UPLOAD_FOLDER = BASE_DIR / "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Startup event to initialize hybrid cache system
@@ -142,6 +152,7 @@ async def startup_event():
     asyncio.create_task(daily_cache_refresh_task())
     print("🕒 Daily cache refresh scheduler started")
 
+
 async def daily_cache_refresh_task():
     """
     Background task that automatically refreshes the cache every 24 hours.
@@ -177,6 +188,7 @@ async def daily_cache_refresh_task():
             print(f"❌ [Scheduled] Error in daily cache refresh: {e}")
             # Continue running even if one refresh fails
             continue
+
 
 async def get_jobs_with_cache():
     """
@@ -228,10 +240,12 @@ async def get_jobs_with_cache():
         
         return []
 
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Home page - redirects to dashboard"""
     return RedirectResponse(url="/dashboard", status_code=302)
+
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
@@ -241,6 +255,7 @@ async def dashboard(request: Request):
         "results": None,
         "error": None
     })
+
 
 @app.post("/match", response_class=HTMLResponse)
 async def match_resume(request: Request, resume: UploadFile = File(...)):
@@ -494,7 +509,7 @@ async def api_match_resume(resume: UploadFile = File(...), think_deeper: str = F
                     "skills_found": resume_skills,
                     "debug_info": {
                         "total_jobs_scraped": len(jobs),
-                        "jobs_processed": len(jobs_to_process),
+                        "jobs_processed": len(jobs),  # jobs_to_process not defined earlier; using len(jobs)
                         "skills_extracted": len(resume_skills),
                         "all_job_scores": [{"company": job.get('company'), "title": job.get('title'), "score": job.get('match_score', 0)} for job in matched_jobs[:5]]
                     }
@@ -548,6 +563,7 @@ async def api_match_resume(resume: UploadFile = File(...), think_deeper: str = F
             status_code=500, 
             detail=f"An unexpected error occurred: {str(e)}. Please try again or contact support if the problem persists."
         )
+
 
 @app.post("/api/match-stream")
 async def stream_match_resume(resume: UploadFile = File(...), think_deeper: str = Form("true")):
@@ -844,6 +860,7 @@ async def stream_match_resume(resume: UploadFile = File(...), think_deeper: str 
         }
     )
 
+
 @app.get("/api/cache-status")
 async def cache_status():
     """Get comprehensive hybrid cache status and information"""
@@ -862,6 +879,7 @@ async def cache_status():
             "automatic_cleanup": True
         }
     })
+
 
 @app.get("/api/test-matching")
 async def test_matching():
@@ -920,6 +938,7 @@ async def test_matching():
                 "llm_enabled": bool(os.getenv("OPENAI_API_KEY"))
             }
         })
+
 
 @app.post("/api/refresh-cache")
 async def refresh_cache(force_full: bool = False, max_days_old: int = 30):
@@ -980,6 +999,7 @@ async def refresh_cache(force_full: bool = False, max_days_old: int = 30):
         print(f"❌ Error refreshing cache: {e}")
         raise HTTPException(status_code=500, detail=f"Cache refresh failed: {str(e)}")
 
+
 @app.post("/api/refresh-cache-incremental")
 async def refresh_cache_incremental(max_days_old: int = 30):
     """
@@ -1010,6 +1030,7 @@ async def refresh_cache_incremental(max_days_old: int = 30):
         print(f"❌ Error in incremental refresh: {e}")
         raise HTTPException(status_code=500, detail=f"Incremental refresh failed: {str(e)}")
 
+
 @app.get("/api/database-stats")
 async def database_stats():
     """Get detailed database statistics"""
@@ -1024,6 +1045,7 @@ async def database_stats():
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get database stats: {str(e)}")
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
