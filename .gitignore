@@ -12,6 +12,8 @@ venv/
 data/resume.pdf
 
 .env
+.env.production
+backend.log
 .env.local
 uploads/
 # Database files
