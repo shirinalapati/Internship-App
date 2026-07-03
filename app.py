@@ -116,13 +116,18 @@ async def lifespan(app: FastAPI):
     cache_available = await loop.run_in_executor(None, job_cache.init_redis)
 
     if cache_available:
+        # Check cache status without loading all jobs into memory
         cache_info = await loop.run_in_executor(None, job_cache.get_cache_info)
-        cached_jobs = await loop.run_in_executor(None, job_cache.get_cached_jobs)
         should_refresh = False
 
+        redis_info = cache_info.get('redis', {})
+        db_info = cache_info.get('database', {})
+        redis_job_count = redis_info.get('job_count', 0)
+        db_active_jobs = db_info.get('active_jobs', 0)
+        cache_has_jobs = redis_job_count > 0 or db_active_jobs > 0
+
         if environment == "development":
-            if cached_jobs:
-                db_info = cache_info.get('database', {})
+            if cache_has_jobs:
                 last_update = db_info.get('last_update')
                 if last_update:
                     from datetime import datetime, timedelta
@@ -133,11 +138,11 @@ async def lifespan(app: FastAPI):
                             logger.info(f"Cache is {time_since_update.total_seconds() / 3600:.1f} hours old — refreshing...")
                             should_refresh = True
                         else:
-                            logger.info(f"Using existing cache: {len(cached_jobs)} jobs (updated {time_since_update.total_seconds() / 3600:.1f}h ago)")
+                            logger.info(f"Cache system ready: {db_active_jobs} jobs in DB, {redis_job_count} in Redis")
                     except Exception as e:
                         logger.warning(f"Error parsing cache timestamp: {e}")
                 else:
-                    logger.info(f"Using existing cache: {len(cached_jobs)} jobs available")
+                    logger.info(f"Cache system ready: {db_active_jobs} jobs in DB, {redis_job_count} in Redis")
             else:
                 should_refresh = True
                 logger.info("No cached jobs found — initializing cache...")
@@ -145,8 +150,8 @@ async def lifespan(app: FastAPI):
             # production AND staging: always scrape on startup so every deploy gets
             # fresh data. The scrape runs in the background — server available immediately.
             should_refresh = True
-            if cached_jobs:
-                logger.info(f"{environment.capitalize()} startup: {len(cached_jobs)} cached jobs available, scraping for fresh data...")
+            if cache_has_jobs:
+                logger.info(f"{environment.capitalize()} startup: {db_active_jobs} jobs in DB, scraping for fresh data...")
             else:
                 logger.info(f"{environment.capitalize()} startup: no cached jobs — initializing cache...")
 
@@ -363,7 +368,7 @@ async def daily_cache_refresh_task():
             refresh_count += 1
             logger.info(f"[Scheduled #{refresh_count}] Starting daily cache refresh")
 
-            # Perform smart scraping with 30-day filter
+            # Step 1: Scrape fresh jobs and persist to database
             try:
                 jobs = await scrape_jobs(max_days_old=30)
             except Exception as scrape_error:
@@ -373,22 +378,34 @@ async def daily_cache_refresh_task():
                 continue  # Don't stop the task, try again in 24h
 
             if jobs:
-                # Store in hybrid cache system
+                # Persist scraped jobs to the database (deduplication happens here)
                 try:
                     cache_result = job_cache.set_cached_jobs(jobs, cache_type='daily_scheduled')
                     new_jobs = cache_result.get('new_jobs', 0)
-                    total_jobs = cache_result.get('total_jobs', len(jobs))
 
-                    if cache_result.get('database_success') or cache_result.get('redis_success'):
-                        logger.info(f"[Scheduled #{refresh_count}] Daily refresh complete: {new_jobs} new jobs, {total_jobs} total active jobs")
+                    if cache_result.get('database_success'):
+                        logger.info(f"[Scheduled #{refresh_count}] Database updated: {new_jobs} new jobs")
                     else:
-                        logger.warning(f"[Scheduled #{refresh_count}] Cache refresh failed — no storage backend succeeded")
+                        logger.warning(f"[Scheduled #{refresh_count}] Database update failed")
                 except Exception as cache_error:
                     logger.error(f"[Scheduled #{refresh_count}] Cache storage failed: {cache_error}")
                     import traceback
                     traceback.print_exc()
             else:
-                logger.info(f"[Scheduled #{refresh_count}] No new jobs found in daily refresh")
+                logger.info(f"[Scheduled #{refresh_count}] No new jobs scraped")
+
+            # Step 2: Refresh Redis from database in chunks (memory-efficient)
+            try:
+                loop = asyncio.get_event_loop()
+                total_cached = await loop.run_in_executor(
+                    None, job_cache.refresh_redis_from_database
+                )
+                logger.info(
+                    f"[Scheduled #{refresh_count}] Daily refresh complete: "
+                    f"{total_cached} jobs now in Redis"
+                )
+            except Exception as redis_error:
+                logger.error(f"[Scheduled #{refresh_count}] Redis refresh failed: {redis_error}")
 
         except asyncio.CancelledError:
             logger.info(f"[Scheduled] Daily cache refresh task cancelled after {refresh_count} refreshes")
@@ -404,29 +421,33 @@ async def get_jobs_with_cache():
     """
     Get jobs using hybrid cache system (Redis + Database).
     This function is used by all endpoints to get job data efficiently.
+
+    On a Redis hit the list is read back from the list key.
+    On a cache miss, jobs are fetched from the database in 500-job pages
+    rather than loading the entire dataset at once, keeping peak memory low.
     """
-    # Try to get from hybrid cache system
+    # Try to get from hybrid cache system (Redis list or DB paginated)
     cached_jobs = job_cache.get_cached_jobs()
-    
+
     if cached_jobs:
         logger.info(f"Using {len(cached_jobs)} jobs from hybrid cache")
         return cached_jobs
 
-    # Cache miss - use smart scraping strategy
-    logger.info("Cache miss — using smart scraping strategy...")
+    # Cache miss — scrape fresh jobs, persist, then stream to Redis in chunks
+    logger.info("Cache miss — scraping fresh jobs...")
     try:
         jobs = await scrape_jobs(max_days_old=30)
 
         if jobs:
             cache_result = job_cache.set_cached_jobs(jobs, cache_type='on_demand')
             new_jobs = cache_result.get('new_jobs', 0)
-            total_jobs = cache_result.get('total_jobs', len(jobs))
 
             if cache_result.get('database_success') or cache_result.get('redis_success'):
-                logger.info(f"Scraped and cached: {new_jobs} new jobs, {total_jobs} total")
+                logger.info(f"Scraped and cached: {new_jobs} new jobs")
             else:
-                logger.warning(f"Scraping successful but caching failed: {total_jobs} jobs")
+                logger.warning("Scraping successful but caching failed")
 
+            # get_cached_jobs() will read from Redis list or DB pages
             return job_cache.get_cached_jobs() or jobs
         else:
             logger.warning("No jobs scraped")
