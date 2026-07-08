@@ -4,6 +4,7 @@ import os
 import json
 import anthropic
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -1538,6 +1539,79 @@ def create_rich_match_description(job, score_data, ai_reasoning):
     
     return opening + ai_section + skill_section + red_flag_section + location_section + score_section
 
+# Module-level constant — built once, reused across all fuzzy_skill_match calls.
+# Previously this dict was allocated and GC'd inside the function on every call
+# (~26k times per match run), burning meaningful CPU.
+_SKILL_VARIATIONS: dict = {
+    'javascript': ['js', 'javascript', 'ecmascript'],
+    'typescript': ['ts', 'typescript'],
+    'react': ['react', 'reactjs', 'react.js'],
+    'node.js': ['node', 'nodejs', 'node.js'],
+    'vue': ['vue', 'vuejs', 'vue.js'],
+    'angular': ['angular', 'angularjs', 'angular.js'],
+    'python': ['python', 'python3', 'py'],
+    'c++': ['c++', 'cpp', 'cplusplus'],
+    'c#': ['c#', 'csharp'],
+    'sql': ['sql', 'mysql', 'postgresql', 'postgres'],
+    'aws': ['aws', 'amazon web services'],
+    'gcp': ['gcp', 'google cloud'],
+    'azure': ['azure', 'microsoft azure'],
+    'docker': ['docker', 'containerization'],
+    'kubernetes': ['kubernetes', 'k8s'],
+    # AI/ML tier — JDs often say "AI/ML" or "machine learning" for roles
+    # that require LLM/RAG skills; group them so AI-engineering experience
+    # surfaces against those postings during the deterministic prefilter.
+    'ai_ml': [
+        'ai', 'ml', 'machine learning', 'artificial intelligence', 'ai/ml',
+        'llm', 'large language model', 'language model',
+        'rag', 'retrieval augmented generation', 'retrieval-augmented generation',
+        'nlp', 'natural language processing',
+        'generative ai', 'gen ai', 'genai',
+        'deep learning', 'neural network',
+    ],
+    'fastapi': ['fastapi', 'fast api'],
+    'websockets': ['websockets', 'websocket', 'web socket', 'ws'],
+    'next.js': ['next.js', 'nextjs', 'next js'],
+    'mongodb': ['mongodb', 'mongo', 'nosql', 'document database'],
+    'redis': ['redis', 'memcached', 'caching', 'in-memory database'],
+    'graphql': ['graphql', 'graph ql'],
+    'tailwindcss': ['tailwindcss', 'tailwind', 'tailwind css'],
+    'agent_development': [
+        'agent development', 'agentic', 'agentic systems', 'autonomous agent',
+        'ai agent', 'agent framework', 'multi-agent', 'multi-agent systems',
+        'mcp', 'model context protocol', 'langchain', 'langgraph',
+        'crewai', 'autogen', 'swarm',
+    ],
+    'workflow_orchestration': [
+        'workflow orchestration', 'workflow automation', 'pipeline orchestration',
+        'langchain', 'langgraph', 'crewai', 'dspy', 'prefect', 'temporal',
+    ],
+    'api_development': [
+        'api integration', 'api development', 'api design',
+        'rest api', 'rest apis', 'restful', 'restful api', 'web services',
+        'fastapi', 'flask', 'express',
+    ],
+    'llm_applications': [
+        'llm applications', 'llm engineering', 'llm systems', 'llm development',
+        'llm', 'large language model', 'language model',
+        'prompt engineering', 'fine-tuning', 'rlhf',
+    ],
+    'evaluation_systems': [
+        'evaluation systems', 'model evaluation', 'ai evaluation', 'llm evaluation',
+        'benchmarking', 'evals', 'rag evaluation',
+        'rag', 'ragas', 'trulens', 'langsmith',
+    ],
+}
+# Inverted index: token → set of canonical groups. A token can belong to
+# multiple groups (e.g. "llm" is in both ai_ml and llm_applications), so we
+# store a set and check for non-empty intersection rather than equality.
+_SKILL_VARIATION_INDEX: dict = {}
+for _canonical, _variants in _SKILL_VARIATIONS.items():
+    for _v in _variants:
+        _SKILL_VARIATION_INDEX.setdefault(_v, set()).add(_canonical)
+
+
+@lru_cache(maxsize=4096)
 def fuzzy_skill_match(resume_skill, job_skill):
     """
     Intelligent fuzzy matching for skills to handle variations.
@@ -1561,72 +1635,11 @@ def fuzzy_skill_match(resume_skill, job_skill):
     if resume_lower in job_lower or job_lower in resume_lower:
         return True
 
-    # Common skill variations (normalized matching)
-    skill_variations = {
-        'javascript': ['js', 'javascript', 'ecmascript'],
-        'typescript': ['ts', 'typescript'],
-        'react': ['react', 'reactjs', 'react.js'],
-        'node.js': ['node', 'nodejs', 'node.js'],
-        'vue': ['vue', 'vuejs', 'vue.js'],
-        'angular': ['angular', 'angularjs', 'angular.js'],
-        'python': ['python', 'python3', 'py'],
-        'c++': ['c++', 'cpp', 'cplusplus'],
-        'c#': ['c#', 'csharp'],
-        'sql': ['sql', 'mysql', 'postgresql', 'postgres'],
-        'aws': ['aws', 'amazon web services'],
-        'gcp': ['gcp', 'google cloud'],
-        'azure': ['azure', 'microsoft azure'],
-        'docker': ['docker', 'containerization'],
-        'kubernetes': ['kubernetes', 'k8s'],
-        # AI/ML tier — JDs often say "AI/ML" or "machine learning" for roles
-        # that require LLM/RAG skills; group them so AI-engineering experience
-        # surfaces against those postings during the deterministic prefilter.
-        'ai_ml': [
-            'ai', 'ml', 'machine learning', 'artificial intelligence', 'ai/ml',
-            'llm', 'large language model', 'language model',
-            'rag', 'retrieval augmented generation', 'retrieval-augmented generation',
-            'nlp', 'natural language processing',
-            'generative ai', 'gen ai', 'genai',
-            'deep learning', 'neural network',
-        ],
-        'fastapi': ['fastapi', 'fast api'],
-        'websockets': ['websockets', 'websocket', 'web socket', 'ws'],
-        'next.js': ['next.js', 'nextjs', 'next js'],
-        'mongodb': ['mongodb', 'mongo', 'nosql', 'document database'],
-        'redis': ['redis', 'memcached', 'caching', 'in-memory database'],
-        'graphql': ['graphql', 'graph ql'],
-        'tailwindcss': ['tailwindcss', 'tailwind', 'tailwind css'],
-        'agent_development': [
-            'agent development', 'agentic', 'agentic systems', 'autonomous agent',
-            'ai agent', 'agent framework', 'multi-agent', 'multi-agent systems',
-            'mcp', 'model context protocol', 'langchain', 'langgraph',
-            'crewai', 'autogen', 'swarm',
-        ],
-        'workflow_orchestration': [
-            'workflow orchestration', 'workflow automation', 'pipeline orchestration',
-            'langchain', 'langgraph', 'crewai', 'dspy', 'prefect', 'temporal',
-        ],
-        'api_development': [
-            'api integration', 'api development', 'api design',
-            'rest api', 'rest apis', 'restful', 'restful api', 'web services',
-            'fastapi', 'flask', 'express',
-        ],
-        'llm_applications': [
-            'llm applications', 'llm engineering', 'llm systems', 'llm development',
-            'llm', 'large language model', 'language model',
-            'prompt engineering', 'fine-tuning', 'rlhf',
-        ],
-        'evaluation_systems': [
-            'evaluation systems', 'model evaluation', 'ai evaluation', 'llm evaluation',
-            'benchmarking', 'evals', 'rag evaluation',
-            'rag', 'ragas', 'trulens', 'langsmith',
-        ],
-    }
-
-    # Check if either skill is in a variation group
-    for canonical, variations in skill_variations.items():
-        if resume_lower in variations and job_lower in variations:
-            return True
+    # Check variation groups via inverted index (O(1) vs O(groups) scan).
+    # A token can belong to multiple groups, so check for non-empty intersection.
+    resume_groups = _SKILL_VARIATION_INDEX.get(resume_lower)
+    if resume_groups and resume_groups & _SKILL_VARIATION_INDEX.get(job_lower, set()):
+        return True
 
     return False
 
@@ -1643,11 +1656,11 @@ def simple_keyword_scoring(job, resume_skills, resume_text="", embedding_score=0
     Key improvements:
     - Uses fuzzy matching for skill variations
     - Only scores based on required_skills (not random description mentions)
-    - Returns 0 if no required skills match
+    - Returns (0, 0) if no required skills match
     - Better handles skill variations (React vs ReactJS)
-    """
-    import re
 
+    Returns: (score, matched_skill_count)
+    """
     score = 0
     matched_skills = []
     skill_match_count = 0
@@ -1657,12 +1670,16 @@ def simple_keyword_scoring(job, resume_skills, resume_text="", embedding_score=0
     job_title = job.get('title', '').lower()
     job_description = job.get('description', '').lower()
 
+    # Pre-normalize resume skills once — avoids repeated .lower().strip() inside
+    # the inner loop (called once here vs. once per job_skill × resume_skill pair).
+    normalized_resume_skills = [s.lower().strip() for s in resume_skills] if resume_skills else []
+
     # 1. Required Skills Matching (60 points max) - PRIMARY SIGNAL
     # Reduced from 90 to 60 to make room for the embedding signal (35 pts).
     # Together they sum to 95 max before bonuses, preserving meaningful spread.
-    if job_skills and resume_skills:
+    if job_skills and normalized_resume_skills:
         for job_skill in job_skills:
-            for resume_skill in resume_skills:
+            for resume_skill in normalized_resume_skills:
                 if fuzzy_skill_match(resume_skill, job_skill):
                     skill_match_count += 1
                     matched_skills.append(job_skill)
@@ -1673,23 +1690,22 @@ def simple_keyword_scoring(job, resume_skills, resume_text="", embedding_score=0
             skill_coverage = skill_match_count / len(job_skills)
             score += int(skill_coverage * 60)
 
-    # CRITICAL: If zero required skills matched, return 0 immediately
+    # CRITICAL: If zero required skills matched, return (0, 0) immediately
     # This prevents irrelevant jobs from appearing (e.g., C++ jobs for JS developers).
     # Exception: if a semantic embedding signal is present, don't hard-zero — the
     # embedding can surface jobs whose vocabulary doesn't overlap the resume but are
     # genuinely relevant (e.g., "distributed systems" resume vs "C++/CUDA" job listing).
     if skill_match_count == 0 and job_skills:
         if embedding_score <= 0.0:
-            return 0
+            return 0, 0
 
     # 1b. Description text scan — bonus for specialized user skills (RAG, Claude,
     # MCP, FastAPI, etc.) that rarely appear in structured required_skills but DO
     # appear in JD body text. Capped at 12 pts so it can't override the primary signal.
-    if job_description and resume_skills:
+    if job_description and normalized_resume_skills:
         already_matched_lower = {s.lower() for s in matched_skills}
         desc_bonus = 0
-        for skill in resume_skills:
-            s = skill.lower().strip()
+        for s in normalized_resume_skills:
             if s in already_matched_lower:
                 continue
             # word-boundary check to avoid "js" matching "adjustments", etc.
@@ -1717,11 +1733,10 @@ def simple_keyword_scoring(job, resume_skills, resume_text="", embedding_score=0
         'devops': ['docker', 'kubernetes', 'aws', 'azure', 'gcp', 'ci/cd'],
     }
 
-    resume_skills_lower = [s.lower() for s in resume_skills]
     for role_type, role_skills in role_patterns.items():
         if role_type in job_title:
             # Check if candidate has relevant skills for this role type
-            role_skill_matches = sum(1 for rs in resume_skills_lower if any(fuzzy_skill_match(rs, role_skill) for role_skill in role_skills))
+            role_skill_matches = sum(1 for rs in normalized_resume_skills if any(fuzzy_skill_match(rs, role_skill) for role_skill in role_skills))
             if role_skill_matches >= 2:
                 score += 5
                 break
@@ -1742,7 +1757,7 @@ def simple_keyword_scoring(job, resume_skills, resume_text="", embedding_score=0
 
     # Quick Mode cap: 90s should be rare and reserved for near-perfect keyword
     # matches. LLM analysis (Think Deeper) is the path to confident 90+ scores.
-    return min(int(score), 94)
+    return min(int(score), 94), skill_match_count
 
 
 def create_keyword_match_description(job, score, matched_skills_count, total_required_skills):
@@ -1834,24 +1849,15 @@ def simple_keyword_match(resume_skills, jobs, resume_text="", progress_callback=
             except Exception:
                 pass
 
-        score = simple_keyword_scoring(job, resume_skills, resume_text, embedding_score=emb_score)
+        score, matched_count = simple_keyword_scoring(job, resume_skills, resume_text, embedding_score=emb_score)
 
         # Only include jobs with some relevance (score > 0)
         if score > 0:
             job_copy = job.copy()
             job_copy['match_score'] = score
 
-            # Count matched skills for description
+            # Generate rich description (matched_count comes from scoring, no second pass)
             job_skills = job.get('required_skills', [])
-            matched_count = 0
-            if job_skills and resume_skills:
-                for job_skill in job_skills:
-                    for resume_skill in resume_skills:
-                        if fuzzy_skill_match(resume_skill, job_skill):
-                            matched_count += 1
-                            break
-
-            # Generate rich description
             job_copy['match_description'] = create_keyword_match_description(
                 job, score, matched_count, len(job_skills)
             )
@@ -2202,7 +2208,7 @@ def prefilter_and_score(resume_profile: Dict, jobs: List[Dict]) -> List[Dict]:
             except Exception:
                 pass
 
-        keyword_score = simple_keyword_scoring(job, skills, embedding_score=embedding_sim)
+        keyword_score, _ = simple_keyword_scoring(job, skills, embedding_score=embedding_sim)
         job_metadata = extract_job_metadata(job)
         # extract_job_metadata parses location from description text via regex,
         # but scraped jobs store the authoritative location in the DB field.
