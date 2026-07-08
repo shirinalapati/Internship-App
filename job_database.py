@@ -576,19 +576,40 @@ def mark_old_jobs_inactive(max_days_old: int = 30, db: Session = None) -> int:
         should_close = False
 
     try:
-        result = db.execute(
-            text("""
-                UPDATE jobs
-                SET    is_active  = false,
-                       updated_at = NOW()
-                WHERE  is_active = true
-                  AND  job_metadata IS NOT NULL
-                  AND  (job_metadata::json->>'days_since_posted')::int > :max_days
-            """),
-            {"max_days": max_days_old}
-        )
-        db.commit()
-        inactive_count = result.rowcount
+        dialect = db.bind.dialect.name if db.bind else "sqlite"
+
+        if dialect == "postgresql":
+            # Single round-trip: let Postgres filter on the JSON field directly.
+            # ::json / ::int casts are Postgres-specific; the SQLite fallback below
+            # handles the test environment (sqlite:///:memory:).
+            result = db.execute(
+                text("""
+                    UPDATE jobs
+                    SET    is_active  = false,
+                           updated_at = NOW()
+                    WHERE  is_active = true
+                      AND  job_metadata IS NOT NULL
+                      AND  (job_metadata::json->>'days_since_posted')::int > :max_days
+                """),
+                {"max_days": max_days_old}
+            )
+            db.commit()
+            inactive_count = result.rowcount
+        else:
+            # SQLite fallback (CI / local dev): ORM loop with Python-side JSON parse.
+            active_jobs = db.query(Job).filter(Job.is_active == True).all()  # noqa: E712
+            inactive_count = 0
+            for job in active_jobs:
+                try:
+                    if job.job_metadata:
+                        metadata = json.loads(job.job_metadata)
+                        days_since_posted = metadata.get('days_since_posted')
+                        if days_since_posted is not None and days_since_posted > max_days_old:
+                            job.is_active = False
+                            inactive_count += 1
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
         if inactive_count > 0:
             logger.info(f"Marked {inactive_count} jobs inactive (>{max_days_old} days old)")
         return inactive_count
