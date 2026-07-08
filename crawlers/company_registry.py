@@ -90,16 +90,25 @@ class CompanyRegistryStore:
         finally:
             close_db(db)
 
-    def get_due_for_crawl(self, priority: List[int] = None) -> List[CompanyRecord]:
-        """Return active companies ordered by crawl urgency (oldest last_crawled first)."""
+    def get_due_for_crawl(self, priority: List[int] = None, limit: int = 200) -> List[CompanyRecord]:
+        """Return active companies ordered by crawl urgency (oldest last_crawled first).
+
+        Fetches at most ``limit`` rows (default 200) so each 15-minute GitHub Actions
+        run downloads ~100 KB instead of ~5 MB for the full registry.  The
+        ORDER BY last_crawled ASC naturally rotates the queue: crawled companies move
+        to the back on their next run, so the full registry is still covered every
+        ~12.7 hours at the default batch size.
+        """
         db = get_db()
         try:
             q = db.query(_ORMCompanyRegistry).filter_by(is_active=True)
             if priority:
                 q = q.filter(_ORMCompanyRegistry.crawl_priority.in_(priority))
-            rows = q.order_by(
-                _ORMCompanyRegistry.last_crawled.asc().nullsfirst()
-            ).all()
+            rows = (
+                q.order_by(_ORMCompanyRegistry.last_crawled.asc().nullsfirst())
+                 .limit(limit)
+                 .all()
+            )
             return [CompanyRecord.from_orm(r) for r in rows]
         finally:
             close_db(db)

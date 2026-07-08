@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 from typing import List, Dict, Optional, Set
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, Index
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, Index, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.sql import func
@@ -576,28 +576,42 @@ def mark_old_jobs_inactive(max_days_old: int = 30, db: Session = None) -> int:
         should_close = False
 
     try:
-        # Get all active jobs
-        active_jobs = db.query(Job).filter(Job.is_active == True).all()
+        dialect = db.bind.dialect.name if db.bind else "sqlite"
 
-        inactive_count = 0
-        for job in active_jobs:
-            try:
-                # Parse metadata to get days_since_posted
-                if job.job_metadata:
-                    metadata = json.loads(job.job_metadata)
-                    days_since_posted = metadata.get('days_since_posted')
-
-                    # Mark inactive if posting date is too old
-                    if days_since_posted is not None and days_since_posted > max_days_old:
-                        job.is_active = False
-                        inactive_count += 1
-            except (json.JSONDecodeError, TypeError):
-                # Skip jobs with invalid metadata
-                continue
+        if dialect == "postgresql":
+            # Single round-trip: let Postgres filter on the JSON field directly.
+            # ::json / ::int casts are Postgres-specific; the SQLite fallback below
+            # handles the test environment (sqlite:///:memory:).
+            result = db.execute(
+                text("""
+                    UPDATE jobs
+                    SET    is_active  = false,
+                           updated_at = NOW()
+                    WHERE  is_active = true
+                      AND  job_metadata IS NOT NULL
+                      AND  (job_metadata::json->>'days_since_posted')::int > :max_days
+                """),
+                {"max_days": max_days_old}
+            )
+            db.commit()
+            inactive_count = result.rowcount
+        else:
+            # SQLite fallback (CI / local dev): ORM loop with Python-side JSON parse.
+            active_jobs = db.query(Job).filter(Job.is_active == True).all()  # noqa: E712
+            inactive_count = 0
+            for job in active_jobs:
+                try:
+                    if job.job_metadata:
+                        metadata = json.loads(job.job_metadata)
+                        days_since_posted = metadata.get('days_since_posted')
+                        if days_since_posted is not None and days_since_posted > max_days_old:
+                            job.is_active = False
+                            inactive_count += 1
+                except (json.JSONDecodeError, TypeError):
+                    continue
 
         if inactive_count > 0:
             logger.info(f"Marked {inactive_count} jobs inactive (>{max_days_old} days old)")
-
         return inactive_count
 
     except Exception as e:
@@ -794,6 +808,13 @@ def get_active_jobs(limit: Optional[int] = None, offset: int = 0, max_days_old: 
     """
     Get active jobs from database, filtered by posting date.
 
+    .. deprecated::
+        Loads the entire result set into memory in one query.  For large
+        datasets (10 000+ rows) prefer ``get_active_jobs_paginated()`` which
+        fetches rows in configurable chunks and keeps peak memory low.
+        This function is kept for backward compatibility with callers that
+        need a flat list (e.g. matching, backfill scripts).
+
     Args:
         limit: Maximum number of jobs to return
         offset: Number of jobs to skip
@@ -854,6 +875,92 @@ def get_active_jobs(limit: Optional[int] = None, offset: int = 0, max_days_old: 
     except Exception as e:
         logger.error(f"Error getting active jobs: {e}")
         return []
+    finally:
+        close_db(db)
+
+
+def get_active_jobs_paginated(offset: int = 0, limit: int = 500, max_days_old: int = 30) -> List[Dict]:
+    """
+    Get a single page of active jobs from the database.
+
+    Designed for memory-efficient streaming: callers loop over pages of
+    ``limit`` rows instead of loading the entire dataset at once.
+
+    Args:
+        offset: Number of rows to skip (0-based).
+        limit:  Maximum number of rows to return per page (default 500).
+        max_days_old: Maximum posting age in days to include (default 30).
+
+    Returns:
+        List of job dicts for this page (may be shorter than ``limit`` on the
+        last page, or empty when there are no more rows).
+    """
+    db = get_db()
+    try:
+        jobs = (
+            db.query(Job)
+            .filter(Job.is_active == True)  # noqa: E712
+            .order_by(Job.last_seen.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        result = []
+        for job in jobs:
+            try:
+                metadata = json.loads(job.job_metadata) if job.job_metadata else {}
+                days_since_posted = metadata.get('days_since_posted')
+                if days_since_posted is not None and days_since_posted > max_days_old:
+                    continue
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+
+            result.append({
+                'id': job.id,
+                'job_hash': job.job_hash,
+                'company': job.company,
+                'title': job.title,
+                'location': job.location,
+                'apply_link': job.apply_link,
+                'description': job.description,
+                'required_skills': json.loads(job.required_skills) if job.required_skills else [],
+                'job_requirements': job.job_requirements,
+                'source': job.source,
+                'category': job.category,
+                'metadata': metadata,
+                'first_seen': job.first_seen,
+                'last_seen': job.last_seen,
+            })
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error getting paginated active jobs (offset={offset}): {e}")
+        return []
+    finally:
+        close_db(db)
+
+
+def get_job_count(active_only: bool = True) -> int:
+    """
+    Return the total number of jobs without loading any rows into memory.
+
+    Args:
+        active_only: When True (default) count only is_active=True rows.
+
+    Returns:
+        Integer count, or 0 on error.
+    """
+    db = get_db()
+    try:
+        query = db.query(func.count(Job.id))
+        if active_only:
+            query = query.filter(Job.is_active == True)  # noqa: E712
+        return query.scalar() or 0
+    except Exception as e:
+        logger.error(f"Error getting job count: {e}")
+        return 0
     finally:
         close_db(db)
 
