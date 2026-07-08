@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 from typing import List, Dict, Optional, Set
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, Index
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean, Index, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.sql import func
@@ -576,28 +576,21 @@ def mark_old_jobs_inactive(max_days_old: int = 30, db: Session = None) -> int:
         should_close = False
 
     try:
-        # Get all active jobs
-        active_jobs = db.query(Job).filter(Job.is_active == True).all()
-
-        inactive_count = 0
-        for job in active_jobs:
-            try:
-                # Parse metadata to get days_since_posted
-                if job.job_metadata:
-                    metadata = json.loads(job.job_metadata)
-                    days_since_posted = metadata.get('days_since_posted')
-
-                    # Mark inactive if posting date is too old
-                    if days_since_posted is not None and days_since_posted > max_days_old:
-                        job.is_active = False
-                        inactive_count += 1
-            except (json.JSONDecodeError, TypeError):
-                # Skip jobs with invalid metadata
-                continue
-
+        result = db.execute(
+            text("""
+                UPDATE jobs
+                SET    is_active  = false,
+                       updated_at = NOW()
+                WHERE  is_active = true
+                  AND  job_metadata IS NOT NULL
+                  AND  (job_metadata::json->>'days_since_posted')::int > :max_days
+            """),
+            {"max_days": max_days_old}
+        )
+        db.commit()
+        inactive_count = result.rowcount
         if inactive_count > 0:
             logger.info(f"Marked {inactive_count} jobs inactive (>{max_days_old} days old)")
-
         return inactive_count
 
     except Exception as e:

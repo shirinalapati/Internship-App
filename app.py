@@ -1966,6 +1966,8 @@ async def crawl_status(request: Request):
     from crawlers.company_registry import CompanyRegistryStore
     from datetime import timedelta
 
+    from sqlalchemy import text as sa_text
+
     db = get_db()
     try:
         now = datetime.utcnow()
@@ -1982,6 +1984,29 @@ async def crawl_status(request: Request):
         last_full = db.query(CacheMetadata).filter(
             CacheMetadata.cache_type == "ats_full"
         ).order_by(CacheMetadata.last_updated.desc()).first()
+
+        # Egress health: verify get_due_for_crawl() is fetching ≤200 rows/call.
+        # rows_per_call should drop from ~10,159 → ≤200 after the limit fix.
+        egress_check = None
+        try:
+            row = db.execute(sa_text("""
+                SELECT calls,
+                       rows,
+                       CASE WHEN calls > 0 THEN rows / calls ELSE 0 END AS rows_per_call
+                FROM   pg_stat_statements
+                WHERE  query LIKE '%company_registry%crawl_priority%'
+                ORDER  BY calls DESC
+                LIMIT  1
+            """)).fetchone()
+            if row:
+                egress_check = {
+                    "calls": row[0],
+                    "total_rows": row[1],
+                    "rows_per_call": row[2],
+                    "status": "ok" if row[2] <= 200 else "high",
+                }
+        except Exception:
+            pass  # pg_stat_statements may not be available in all environments
     finally:
         close_db(db)
 
@@ -2000,6 +2025,7 @@ async def crawl_status(request: Request):
         # summary/error of each type's most recent completed run this process.
         "running": {k: bool(v) for k, v in _CRAWL_RUNNING.items()},
         "last_run": _CRAWL_LAST,
+        "egress_health": egress_check,
     })
 
 
