@@ -9,6 +9,7 @@ import FindPage from './pages/FindPage';
 import HistoryPage from './pages/HistoryPage';
 import SavedJobsPage from './pages/SavedJobsPage';
 import UsagePage from './pages/UsagePage';
+import CritiquePage from './pages/CritiquePage';
 import DeveloperPage from './pages/DeveloperPage';
 import DocsPage from './pages/DocsPage';
 import LoginPage from './pages/LoginPage';
@@ -88,6 +89,7 @@ function App() {
               <Route path="/history" element={<HistoryPage />} />
               <Route path="/saved" element={<SavedJobsPage />} />
               <Route path="/usage" element={<UsagePage />} />
+              <Route path="/critique" element={<CritiquePage />} />
               <Route path="/developer" element={<DeveloperPage />} />
               <Route path="/docs" element={<DocsPage />} />
               <Route path="/login" element={<LoginPage />} />

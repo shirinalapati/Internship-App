@@ -28,6 +28,11 @@ const Header: React.FC = () => {
         Find
       </Link>
       {isSignedIn && (
+        <Link to="/critique" onClick={closeMenu} className="font-mono text-xs text-text-secondary hover:text-text-primary transition-colors">
+          Critique
+        </Link>
+      )}
+      {isSignedIn && (
         <Link to="/saved" onClick={closeMenu} className="font-mono text-xs text-text-secondary hover:text-text-primary transition-colors">
           Saved
         </Link>

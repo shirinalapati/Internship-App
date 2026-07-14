@@ -157,6 +157,11 @@ const UsagePage: React.FC = () => {
             <QuotaCard label="Tailored resumes" metric={data.tailor_resume} />
             <QuotaCard label="Think Deeper matches" metric={data.think_deeper} />
             <QuotaCard
+              label="Critique"
+              metric={data.critique}
+              note="Re-viewing a resume you've already critiqued (same file, same industry) is free and doesn't count against this — only a fresh critique does."
+            />
+            <QuotaCard
               label="Remote compiles — API key"
               metric={data.remote_compile}
               note={
@@ -177,9 +182,10 @@ const UsagePage: React.FC = () => {
               </div>
               <p className="text-sm text-text-secondary leading-relaxed mb-5">
                 Resume tailoring is capped at{' '}
-                <span className="font-medium text-text-primary">5/week</span> and Think
+                <span className="font-medium text-text-primary">5/week</span>, Think
                 Deeper matches at{' '}
-                <span className="font-medium text-text-primary">20/week</span> per account.
+                <span className="font-medium text-text-primary">20/week</span>, and Critique at{' '}
+                <span className="font-medium text-text-primary">3/week</span> per account.
                 Remote compiles via your API key are capped at{' '}
                 <span className="font-medium text-text-primary">15/week</span> — local
                 (Docker) compiles are unlimited. Quick matches remain{' '}

@@ -15,6 +15,8 @@ export interface UsageData {
   think_deeper: QuotaMetric;
   /** Consumed by API-key remote compiles (MCP /api/v1), not the in-app tailor feature. */
   remote_compile: QuotaMetric;
+  /** Bullet-level resume feedback (/critique). Cache hits are free and don't count here. */
+  critique: QuotaMetric;
 }
 
 export function useUsage() {
