@@ -14,20 +14,18 @@ function Hero() {
           <div className="flex items-center gap-3 mb-7">
             <span className="block w-8 h-px bg-text-tertiary flex-shrink-0" />
             <span className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">
-              An honest internship index
+              An honest shot at getting hired
             </span>
           </div>
 
           <h1 className="font-serif text-[2.6rem] md:text-5xl text-text-primary leading-[1.1] mb-5">
-            Upload your resume.
-            <br />
-            See your <em className="italic">30 best-fit</em> internships in 30 seconds.
+            An AI that's <em className="italic">working</em> to get you hired.
           </h1>
 
           <p className="text-sm text-text-secondary leading-relaxed max-w-md mb-8">
-            Free, built by a CS student at SJSU. It reads the skills, frameworks, and
-            experience levels in your résumé, then ranks every live posting against your profile.
-            No keyword roulette. No recruiter middleware. No ads.
+            We rank your shot at every live internship, flag what's actually holding your
+            résumé back, and rewrite it until it's ready to land interviews. Free, built by a
+            CS student at SJSU — no keyword roulette, no recruiter middleware, no ads.
           </p>
 
           <div className="flex items-center gap-5">

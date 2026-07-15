@@ -6,8 +6,8 @@ export function ClosingCTA({ activeJobs }: { activeJobs: number | null }) {
   return (
     <section className="py-16 md:py-20">
       <h2 className="font-serif text-3xl md:text-4xl text-text-primary leading-[1.15] mb-8 max-w-lg">
-        {count}. Ranked against your resume in{' '}
-        <em className="italic">30 seconds.</em>
+        {count}. Scored by your shot at getting hired —{' '}
+        <em className="italic">in 30 seconds.</em>
       </h2>
       <div className="flex items-center gap-5">
         <Link
