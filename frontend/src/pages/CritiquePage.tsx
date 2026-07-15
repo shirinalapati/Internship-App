@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { useAuth, SignInButton } from '@clerk/react';
-import { Upload } from 'lucide-react';
+import { Upload, CheckCircle2, Sparkles, Eye, PenLine } from 'lucide-react';
+import Header from '../components/Header';
 import Logo from '../components/Logo';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -228,6 +229,7 @@ const CritiquePage: React.FC = () => {
   const [editingCategory, setEditingCategory] = useState(false);
   const [extraContext, setExtraContext] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nextDelay = useRiseDelay();
 
@@ -273,6 +275,20 @@ const CritiquePage: React.FC = () => {
     const f = e.target.files?.[0];
     if (f) submitResume(f);
   };
+
+  const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) submitResume(f);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => setIsDragging(false);
 
   const handleCategoryChange = (newCategory: string) => {
     setEditingCategory(false);
@@ -346,25 +362,139 @@ const CritiquePage: React.FC = () => {
 
   if (!isSignedIn) {
     return (
-      <div className="min-h-screen bg-bg text-text-primary font-sans">
-        <header className="flex items-center justify-between px-9 py-4 border-b border-lp-border">
-          <div className="flex items-center gap-3.5">
-            <Logo size={24} />
-            <div className="w-px h-5 bg-[rgba(31,27,22,0.15)]" />
-            <div className="text-sm font-semibold tracking-wide">Critique</div>
+      <div className="min-h-screen bg-bg text-text-primary">
+        <Header />
+        <main className="max-w-[860px] mx-auto px-6 py-12">
+          <div className="pt-6 pb-10 border-b border-lp-border">
+            <div className="flex items-center gap-3 mb-6">
+              <span className="block w-8 h-px bg-text-tertiary flex-shrink-0" />
+              <span className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">
+                Resume feedback
+              </span>
+            </div>
+            <h1 className="font-serif text-3xl md:text-4xl text-text-primary mb-3">
+              Find out why your resume isn't getting callbacks.
+            </h1>
+            <p className="text-sm text-text-secondary max-w-lg mb-8">
+              Critique reads your resume the way recruiters actually screen it and flags the handful
+              of lines holding you back — sign in to try it.
+            </p>
+            <SignInButton mode="modal">
+              <button className="inline-block bg-text-primary text-bg px-5 py-2.5 font-mono text-xs tracking-wide hover:opacity-80 transition-opacity">
+                Sign in →
+              </button>
+            </SignInButton>
           </div>
-        </header>
-        <div className="max-w-[860px] mx-auto px-6 py-24">
-          <h2 className="font-serif text-3xl text-text-primary mb-3">Sign in to use Critique.</h2>
-          <p className="font-mono text-xs text-text-tertiary mb-8 max-w-sm">
-            Upload a resume and get bullet-level feedback tied to your account's weekly limit.
-          </p>
-          <SignInButton mode="modal">
-            <button className="inline-block bg-text-primary text-bg px-5 py-2.5 font-mono text-xs tracking-wide hover:opacity-80 transition-opacity">
-              Sign in →
-            </button>
-          </SignInButton>
-        </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!result) {
+    return (
+      <div className="min-h-screen bg-bg text-text-primary">
+        <Header />
+        <main className="max-w-[860px] mx-auto px-6 py-12 space-y-0">
+          {/* Hero */}
+          <div className="pt-6 pb-10 border-b border-lp-border">
+            <div className="flex items-center gap-3 mb-6">
+              <span className="block w-8 h-px bg-text-tertiary flex-shrink-0" />
+              <span className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">
+                Resume feedback
+              </span>
+            </div>
+            <h1 className="font-serif text-3xl md:text-4xl text-text-primary mb-2">
+              Get told exactly what's costing you callbacks.
+            </h1>
+            <p className="text-sm text-text-secondary max-w-lg">
+              Most resumes don't fail on one big thing — they fail on 2 or 3 vague lines a recruiter
+              skims past in six seconds. Critique reads your resume the same way a recruiter would,
+              flags only the handful of lines worth your attention — both good and bad — and tells you
+              exactly why.
+            </p>
+          </div>
+
+          {/* Upload card */}
+          <div className="py-8 border-b border-lp-border">
+            <div className="max-w-2xl">
+              <div className="flex items-center gap-2 mb-5">
+                <Upload className="h-4 w-4 text-text-secondary" />
+                <span className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">
+                  Upload Your Resume
+                </span>
+              </div>
+              <label
+                className={`flex flex-col items-center justify-center w-full h-32 border border-dashed cursor-pointer transition-colors ${
+                  isDragging ? 'border-text-primary bg-ia-subtle' : 'border-lp-border hover:border-text-secondary'
+                }`}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+              >
+                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                  {loading ? (
+                    <>
+                      <Sparkles className="h-6 w-6 mb-2 text-text-primary animate-spin" />
+                      <p className="text-sm text-text-primary">Reading your resume…</p>
+                    </>
+                  ) : isDragging ? (
+                    <>
+                      <Upload className="h-6 w-6 mb-2 text-text-primary" />
+                      <p className="text-sm text-text-primary">Drop it here</p>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-6 w-6 mb-2 text-text-tertiary" />
+                      <p className="text-sm text-text-secondary">
+                        Tap to upload
+                        <span className="hidden sm:inline"> or drag and drop</span>
+                      </p>
+                      <p className="font-mono text-[10px] text-text-tertiary mt-0.5">PDF only</p>
+                    </>
+                  )}
+                </div>
+                <input type="file" accept=".pdf" className="hidden" onChange={handleFileChange} disabled={loading} />
+              </label>
+            </div>
+          </div>
+
+          {/* What you get */}
+          <div className="py-8 border-b border-lp-border grid grid-cols-1 sm:grid-cols-3 gap-6">
+            <div className="flex flex-col gap-2">
+              <Eye className="h-4 w-4 text-text-secondary" />
+              <p className="text-sm text-text-primary font-medium">Sparse, honest feedback</p>
+              <p className="text-xs text-text-tertiary leading-relaxed">
+                Only the bullets that need work get flagged — red for critical, yellow for needs work,
+                green for "do more of this." Unmarked lines are already fine.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Sparkles className="h-4 w-4 text-text-secondary" />
+              <p className="text-sm text-text-primary font-medium">Calibrated to your field</p>
+              <p className="text-xs text-text-tertiary leading-relaxed">
+                We detect your target industry from the resume itself (editable if we're wrong) and
+                critique against what recruiters in that field actually screen for.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <PenLine className="h-4 w-4 text-text-secondary" />
+              <p className="text-sm text-text-primary font-medium">Turn it into a rewrite</p>
+              <p className="text-xs text-text-tertiary leading-relaxed">
+                Add optional context about what you're targeting, and we'll rewrite the flagged lines
+                into a fresh PDF — keeping everything that already works.
+              </p>
+            </div>
+          </div>
+
+          {error && (
+            <div className="py-8 border-b border-lp-border max-w-2xl">
+              <div className="border border-lp-border p-4">
+                <p className="font-mono text-[10px] uppercase tracking-widest text-red-500 mb-1">Error</p>
+                <p className="text-text-secondary text-sm">{error}</p>
+              </div>
+            </div>
+          )}
+        </main>
       </div>
     );
   }
@@ -374,7 +504,7 @@ const CritiquePage: React.FC = () => {
       <style>{`@keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
         @media (prefers-reduced-motion: reduce) { [style*="animation: rise"] { animation: none !important; opacity: 1 !important; transform: none !important; } }`}</style>
 
-      {/* Header */}
+      {/* Minimal focused-task header — full site nav lives on the pre-upload screen above */}
       <header className="flex items-center justify-between px-9 py-4 border-b border-lp-border">
         <div className="flex items-center gap-3.5">
           <Logo size={24} />
@@ -387,7 +517,7 @@ const CritiquePage: React.FC = () => {
               className="flex items-center gap-2 px-3 py-[5px] rounded-full border border-lp-border"
               style={{ background: 'var(--lp-surface)' }}
             >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'hsl(142 72% 45%)' }} />
+              <CheckCircle2 className="w-3 h-3" style={{ color: 'hsl(142 72% 45%)' }} />
               <span className="font-mono text-[11.5px] text-text-secondary">{file.name}</span>
             </div>
             <button
@@ -404,25 +534,6 @@ const CritiquePage: React.FC = () => {
       {error && (
         <div className="max-w-[860px] mx-auto px-6 pt-4">
           <div className="border border-lp-border bg-surface p-3 text-sm text-text-secondary">{error}</div>
-        </div>
-      )}
-
-      {/* Upload prompt — before any resume is critiqued */}
-      {!result && (
-        <div className="flex flex-col items-center justify-center px-8 py-24 gap-4">
-          <label
-            className="flex flex-col items-center justify-center w-full max-w-md h-40 border-2 border-dashed rounded-lg cursor-pointer transition-colors"
-            style={{ borderColor: 'rgba(31,27,22,0.2)', background: 'var(--lp-surface)' }}
-          >
-            <div className="flex flex-col items-center gap-2">
-              <Upload className="h-8 w-8 text-text-tertiary" />
-              <p className="text-sm font-medium text-text-primary">
-                {loading ? 'Reading your resume…' : 'Click to upload a resume'}
-              </p>
-              <p className="text-xs text-text-tertiary">PDF only</p>
-            </div>
-            <input type="file" accept=".pdf" className="hidden" onChange={handleFileChange} disabled={loading} />
-          </label>
         </div>
       )}
 
