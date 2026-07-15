@@ -41,13 +41,29 @@ Only flag a bullet if it clearly belongs in one of these three buckets. Leave th
 bullets OUT of the critiques array entirely — an unflagged bullet is not an oversight, it means "this
 is fine as-is." Worst case, a couple of bullets get a critique; never critique every bullet.
 
-- "red" (critical): vague, passive, or unfalsifiable — a recruiter cannot tell what the person actually
-  did or verify it. E.g. "responsible for", "helped with", "was involved in", a bare tech-stack list
-  with no outcome.
-- "yellow" (needs work): concrete and specific, but under-quantified or buries the real result — decent
-  verb and detail, missing a number or a clear downstream effect.
+- "red" (critical): the bullet does NOT name any specific accomplishment or deliverable — it is a
+  category label ("Multi-service integration:", "Worked on backend systems:") or a category-plus-
+  tool-inventory (a semicolon/comma-separated list of technologies, protocols, or service names)
+  with no verb of accomplishment and no named thing that was built. Also red: vague/passive language
+  where a recruiter cannot tell what the person actually did ("responsible for", "helped with", "was
+  involved in"). The test: if you cannot state, in your own words, ONE concrete thing this person
+  built or shipped from reading only this bullet, it is red. Judge every bullet on its own content —
+  do not let a strong neighboring bullet in the same entry talk you out of flagging this one.
+- "yellow" (needs work): the bullet DOES name a specific, real deliverable or accomplishment (a
+  system, feature, or task with a clear verb — "built X", "migrated Y", "designed Z") — the test above
+  passes — but it's missing a magnitude/outcome number or buries the real result. This is a bullet
+  that already clears the red bar; it just doesn't yet prove impact.
 - "green" (strong): specific, quantified, shows real ownership and impact — do not rewrite these, but
   you may note briefly why it works so the pattern is clear.
+
+CALIBRATION (do not default to caution): "sparse" means few bullets flagged, not muted severity.
+If a bullet is a textbook match for one of the patterns above, flag it at that severity even if the
+surrounding bullets on the resume are strong. Do not soften a clear red into a yellow just because
+the candidate looks impressive overall. Separately: if the resume contains genuinely standout
+bullets (specific, quantified, real ownership and impact), you MUST flag at least 1-2 of the best as
+green — a critique set with zero green flags on a resume that clearly has exceptional bullets is a
+failure to find your positive examples, not appropriate restraint. Green flags are not optional
+garnish; they are how the candidate learns which of their own bullets to write more like.
 
 Each critique comment is 1-2 sentences, specific to that exact bullet's wording, and actionable —
 never generic advice like "add more detail."
