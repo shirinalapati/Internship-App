@@ -1864,6 +1864,122 @@ async def critique_resume_endpoint(
     return JSONResponse({**result, "cached": False})
 
 
+@app.post("/api/dev/critique-resume-text")
+@limiter.limit("5/minute")
+async def critique_resume_text_dev_endpoint(request: Request, user_id: str = Depends(require_user)):
+    """DEV-ONLY: same as /api/critique-resume but takes pasted resume text instead of a PDF
+    upload. Exists purely so the Critique flow can be exercised by browser automation / manual
+    testing when a working file input isn't available — mirrors production's parse-then-critique
+    call, just skipping the PDF-extraction step. 404s outside development/staging."""
+    if _ENVIRONMENT == "production":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    from job_categories import CATEGORY_IDS
+    from resume_critique.critique_resume import critique_resume_to_json
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    resume_text = (body.get("resume_text") or "").strip()
+    if not resume_text:
+        raise HTTPException(status_code=400, detail="resume_text is required")
+    target_category = body.get("target_category") or ""
+    category = target_category if target_category in CATEGORY_IDS else None
+
+    try:
+        result = critique_resume_to_json(resume_text, target_category=category)
+    except RuntimeError as e:
+        logger.error(f"Dev critique-by-text error (user={user_id}): {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Dev critique-by-text error (user={user_id}): unexpected — {e}")
+        raise HTTPException(status_code=500, detail=f"Resume critique failed: {e}")
+
+    return JSONResponse({**result, "cached": False})
+
+
+@app.post("/api/critique-resume/rewrite")
+@limiter.limit("2/minute")
+async def critique_rewrite_endpoint(request: Request, user_id: str = Depends(require_user)):
+    """Rewrites ONLY the critiqued bullets (everything else stays byte-identical) and compiles
+    a fresh PDF. JSON in/out — the client already has structured_resume + critiques from the
+    /api/critique-resume call, so no file re-upload is needed. Consumes the TAILOR quota (same
+    ledger as /api/tailor-resume), not the critique quota — this is a resume-generation action,
+    same reasoning as why remote-compile has its own separate ledger from tailor."""
+    import base64
+
+    from quota import get_tailor_quota_status, record_tailor_request, WEEKLY_TAILOR_LIMIT
+    from resume_critique.critique_resume import apply_critique_rewrite, to_compile_schema
+    from resume_tailor.tailor_resume import compile_resume_json_to_pdf
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    structured_resume = body.get("structured_resume")
+    extra_context = body.get("extra_context", "")
+    # Green bullets are "do more of this" exemplars, not rewrite targets — only red/yellow
+    # actually get sent to the model, so rewritten_bullet_ids below is never a false label.
+    critiques = [c for c in (body.get("critiques") or []) if c.get("severity") in ("red", "yellow")]
+
+    if not isinstance(structured_resume, dict):
+        raise HTTPException(status_code=400, detail="structured_resume is required")
+    if not critiques:
+        raise HTTPException(status_code=400, detail="No red/yellow critiques to rewrite")
+
+    if TRACK_USAGE:
+        db = get_db()
+        try:
+            status = get_tailor_quota_status(db, user_id)
+            if status["remaining"] <= 0:
+                reset_at = status["reset_at"]
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "error": "weekly_quota_exceeded",
+                        "message": f"You've used all {WEEKLY_TAILOR_LIMIT} tailored resumes this week.",
+                        "limit": status["limit"],
+                        "used": status["used"],
+                        "remaining": 0,
+                        "reset_at": reset_at.isoformat() if reset_at else None,
+                    },
+                )
+        finally:
+            close_db(db)
+
+    try:
+        rewritten = apply_critique_rewrite(structured_resume, critiques, extra_context)
+        pdf_bytes, _diagnostics = compile_resume_json_to_pdf(to_compile_schema(rewritten))
+    except RuntimeError as e:
+        logger.error(f"Critique rewrite error (user={user_id}): {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="LaTeX compiler unavailable — pdflatex not found")
+    except Exception as e:
+        logger.error(f"Critique rewrite error (user={user_id}): unexpected — {e}")
+        raise HTTPException(status_code=500, detail=f"Resume rewrite failed: {e}")
+
+    if TRACK_USAGE:
+        db = get_db()
+        try:
+            record_tailor_request(db, user_id, "Critique-based rewrite", "Critique")
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to record tailor quota entry for user={user_id}: {e}")
+            db.rollback()
+        finally:
+            close_db(db)
+
+    return JSONResponse({
+        "structured_resume": rewritten,
+        "pdf_base64": base64.b64encode(pdf_bytes).decode(),
+        "rewritten_bullet_ids": [c["bullet_id"] for c in critiques if c.get("bullet_id")],
+    })
+
+
 @app.get("/api/usage")
 @limiter.limit("20/minute")
 async def get_usage(request: Request, user_id: str = Depends(require_user)):

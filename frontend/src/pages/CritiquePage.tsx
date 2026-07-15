@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { useAuth, SignInButton } from '@clerk/react';
-import { Upload, CheckCircle2, Sparkles, Eye, PenLine } from 'lucide-react';
+import { Upload, CheckCircle2, Sparkles, Eye, PenLine, Download } from 'lucide-react';
 import Header from '../components/Header';
 import Logo from '../components/Logo';
 import { Badge } from '../components/ui/badge';
@@ -66,6 +66,255 @@ const SEVERITY: Record<
 
 const contactLine = (r: CritiqueResult) =>
   [r.email, r.phone, r.website, r.github].filter(Boolean).join('  ·  ');
+
+// ---------------------------------------------------------------------------
+// Tailored-result / diff view — Current vs Tailored tabs + Single/Compare toggle
+// ---------------------------------------------------------------------------
+
+interface TailoredResult {
+  structured: any;
+  pdfBase64: string;
+  rewrittenIds: string[];
+}
+
+interface DiffBullet {
+  id: string;
+  current: string;
+  tailored: string;
+  changed: boolean;
+}
+type DiffBlock =
+  | { kind: 'header'; name: string; contact: string }
+  | { kind: 'heading'; text: string }
+  | { kind: 'entry'; title: string; date: string }
+  | { kind: 'bullets'; items: DiffBullet[] };
+
+function buildDiffBlocks(current: CritiqueResult, tailoredStructured: any, rewrittenIds: string[]): DiffBlock[] {
+  const rewrittenSet = new Set(rewrittenIds);
+  const blocks: DiffBlock[] = [{ kind: 'header', name: current.name, contact: contactLine(current) }];
+
+  if (current.experience.length > 0) {
+    blocks.push({ kind: 'heading', text: 'Experience' });
+    current.experience.forEach((exp, i) => {
+      const tExp = tailoredStructured?.experience?.[i];
+      blocks.push({ kind: 'entry', title: `${exp.title} — ${exp.company}`, date: exp.dates });
+      blocks.push({
+        kind: 'bullets',
+        items: exp.bullets.map((b, j) => ({
+          id: b.id,
+          current: b.text,
+          tailored: tExp?.bullets?.[j]?.text ?? b.text,
+          changed: rewrittenSet.has(b.id),
+        })),
+      });
+    });
+  }
+
+  if (current.projects.length > 0) {
+    blocks.push({ kind: 'heading', text: 'Projects' });
+    current.projects.forEach((proj, i) => {
+      const tProj = tailoredStructured?.projects?.[i];
+      blocks.push({ kind: 'entry', title: proj.name, date: proj.dates });
+      blocks.push({
+        kind: 'bullets',
+        items: proj.bullets.map((b, j) => ({
+          id: b.id,
+          current: b.text,
+          tailored: tProj?.bullets?.[j]?.text ?? b.text,
+          changed: rewrittenSet.has(b.id),
+        })),
+      });
+    });
+  }
+
+  return blocks;
+}
+
+// Mirrors the real compiled PDF's US Letter proportions (612x792pt, ratio 0.773) AND its
+// page-fill behavior (resume_tailor._lock_font grows font size to fill slack, shrinks to
+// avoid overflow) so the on-screen mock resume reads as an actual page instead of a fixed-font
+// column that leaves a blank void under short content or clips long content. We can't use CSS
+// `zoom` to grow — zoom scales width too, and width is fixed by the frame, so growing that way
+// would clip content on the sides. Instead we scale font sizes directly (via `fontScale`) and
+// leave padding/width untouched, then measure and converge over a few passes.
+const PAGE_WIDTH = 720;
+const PAGE_HEIGHT = Math.round(PAGE_WIDTH * (11 / 8.5));
+const FONT_SCALE_MIN = 0.65;
+const FONT_SCALE_MAX = 1.6;
+const FONT_SCALE_MAX_ITERATIONS = 4;
+
+function ResumeDiffPage({
+  blocks,
+  variant,
+  showChanges,
+  compact,
+}: {
+  blocks: DiffBlock[];
+  variant: 'current' | 'tailored';
+  showChanges: boolean;
+  compact?: boolean;
+}) {
+  const accent = variant === 'tailored' ? 'hsl(142 72% 45%)' : 'hsl(38 92% 55%)';
+  const tint = variant === 'tailored' ? 'hsl(142 72% 45% / 0.10)' : 'hsl(38 92% 55% / 0.11)';
+  const tagColor = variant === 'tailored' ? 'hsl(142 72% 34%)' : 'hsl(38 78% 38%)';
+  const tagText = variant === 'tailored' ? 'rewritten' : 'flagged';
+  const baseFs = compact ? 11 : 13;
+
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [fontScale, setFontScale] = useState(1);
+  const iterationRef = useRef(0);
+
+  // Resets the search whenever the underlying content changes (new resume, new critiques).
+  React.useLayoutEffect(() => {
+    iterationRef.current = 0;
+    setFontScale(1);
+  }, [blocks]);
+
+  // Converges fontScale toward whatever fills PAGE_HEIGHT as closely as possible, in a few
+  // measure-and-correct passes (font-size changes don't scale height linearly — margins and
+  // gaps stay fixed — so one shot rarely lands exactly on target).
+  React.useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el || iterationRef.current >= FONT_SCALE_MAX_ITERATIONS) return;
+    const measuredHeight = el.scrollHeight;
+    const ratio = PAGE_HEIGHT / measuredHeight;
+    if (Math.abs(ratio - 1) < 0.02) return;
+    const next = Math.min(FONT_SCALE_MAX, Math.max(FONT_SCALE_MIN, fontScale * ratio));
+    if (Math.abs(next - fontScale) < 0.01) return;
+    iterationRef.current += 1;
+    setFontScale(next);
+  }, [blocks, fontScale]);
+
+  const sz = (px: number) => px * fontScale;
+
+  return (
+    <div
+      style={{
+        width: PAGE_WIDTH,
+        height: PAGE_HEIGHT,
+        background: '#FDFCFA',
+        border: '1px solid rgba(31,27,22,0.08)',
+        borderRadius: 2,
+        boxShadow: '0 1px 2px rgba(31,27,22,0.08), 0 16px 48px rgba(31,27,22,0.12)',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+      }}
+    >
+    <div
+      ref={contentRef}
+      style={{
+        padding: '52px 60px 60px',
+        boxSizing: 'border-box',
+        fontFamily: "'Source Serif 4', Georgia, serif",
+        color: '#1a1a1a',
+      }}
+    >
+      {blocks.map((block, i) => {
+        if (block.kind === 'header') {
+          return (
+            <div key={i} style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: sz(25), fontWeight: 700, letterSpacing: '0.01em' }}>{block.name}</div>
+              <div style={{ fontSize: sz(12), color: '#444', marginTop: 6 }}>{block.contact}</div>
+            </div>
+          );
+        }
+        if (block.kind === 'heading') {
+          return (
+            <div
+              key={i}
+              style={{
+                fontSize: sz(12), fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
+                borderBottom: '1px solid #1a1a1a', paddingBottom: 4, margin: '26px 0 11px',
+              }}
+            >
+              {block.text}
+            </div>
+          );
+        }
+        if (block.kind === 'entry') {
+          return (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 14 }}>
+              <div style={{ fontSize: sz(13.5), fontWeight: 700 }}>{block.title}</div>
+              <div style={{ fontSize: sz(12), fontStyle: 'italic', color: '#444', whiteSpace: 'nowrap', paddingLeft: 14 }}>{block.date}</div>
+            </div>
+          );
+        }
+        // bullets
+        return (
+          <ul key={i} style={{ listStyle: 'none', margin: '7px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {block.items.map((it) => {
+              const changed = it.changed && showChanges;
+              const text = variant === 'tailored' ? it.tailored : it.current;
+              return (
+                <li
+                  key={it.id}
+                  style={
+                    changed
+                      ? { position: 'relative', paddingLeft: 18, paddingTop: 4, paddingBottom: 4, paddingRight: 10, fontSize: sz(baseFs), lineHeight: 1.5, background: tint, boxShadow: `inset 2px 0 0 ${accent}`, borderRadius: 4 }
+                      : { position: 'relative', paddingLeft: 16, fontSize: sz(baseFs), lineHeight: 1.5 }
+                  }
+                >
+                  <span style={{ position: 'absolute', left: changed ? 8 : 2, top: changed ? 4 : 0, color: '#666' }}>•</span>
+                  {text}
+                  {changed && (
+                    <span style={{ marginLeft: 6, fontFamily: "'Source Sans 3', sans-serif", fontSize: sz(9.5), fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: tagColor, verticalAlign: '1.5px', whiteSpace: 'nowrap' }}>
+                      {tagText}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        );
+      })}
+    </div>
+    </div>
+  );
+}
+
+const ZOOM_MIN = 0.4;
+const ZOOM_MAX = 1.1;
+const ZOOM_STEP = 0.1;
+
+function ZoomControl({ zoom, onChange }: { zoom: number; onChange: (z: number) => void }) {
+  // "Outline mono" — no fill, just an ink border + JetBrains Mono numerals, matching the
+  // page's own eyebrow-label styling ("RESUME FEEDBACK", "CURRENT — before critique") instead
+  // of a generic solid-purple button pill. Approved via Lavish review (option D).
+  return (
+    <div
+      className="inline-flex items-center"
+      style={{
+        gap: 2,
+        borderRadius: 7,
+        padding: 2,
+        background: 'transparent',
+        border: '1px solid var(--lp-text-primary)',
+      }}
+    >
+      <button
+        type="button"
+        aria-label="Zoom out"
+        onClick={() => onChange(Math.max(ZOOM_MIN, +(zoom - ZOOM_STEP).toFixed(2)))}
+        disabled={zoom <= ZOOM_MIN}
+        style={{ width: 20, height: 20, display: 'grid', placeItems: 'center', border: 'none', background: 'transparent', cursor: zoom <= ZOOM_MIN ? 'default' : 'pointer', color: 'var(--lp-text-primary)', opacity: zoom <= ZOOM_MIN ? 0.4 : 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1, fontWeight: 700 }}
+      >
+        −
+      </button>
+      <span className="tabular-nums" style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 10.5, width: 32, textAlign: 'center', color: 'var(--lp-text-primary)', fontWeight: 700 }}>
+        {Math.round(zoom * 100)}%
+      </span>
+      <button
+        type="button"
+        aria-label="Zoom in"
+        onClick={() => onChange(Math.min(ZOOM_MAX, +(zoom + ZOOM_STEP).toFixed(2)))}
+        disabled={zoom >= ZOOM_MAX}
+        style={{ width: 20, height: 20, display: 'grid', placeItems: 'center', border: 'none', background: 'transparent', cursor: zoom >= ZOOM_MAX ? 'default' : 'pointer', color: 'var(--lp-text-primary)', opacity: zoom >= ZOOM_MAX ? 0.4 : 1, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, lineHeight: 1, fontWeight: 700 }}
+      >
+        +
+      </button>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Staggered "rise" reveal — sequential animation-delay down the page.
@@ -218,20 +467,65 @@ function CritiqueBulletLi({
 // Page
 // ---------------------------------------------------------------------------
 
+// Survives a refresh (cleared when the tab closes) — holds only the JSON results,
+// never the raw File object, so re-detecting industry after a refresh still needs a re-upload.
+const SESSION_KEY = 'critique_session_v1';
+
+interface PersistedCritiqueSession {
+  result: CritiqueResult | null;
+  tailoredResult: TailoredResult | null;
+  category: string;
+  extraContext: string;
+  activeTab: 'current' | 'tailored';
+  viewMode: 'single' | 'compare';
+}
+
+const loadPersistedSession = (): PersistedCritiqueSession | null => {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
 const CritiquePage: React.FC = () => {
   const { isLoaded, isSignedIn, getToken } = useAuth();
+  const persisted = React.useMemo(loadPersistedSession, []);
   const [file, setFile] = useState<File | null>(null);
-  const [result, setResult] = useState<CritiqueResult | null>(null);
+  const [result, setResult] = useState<CritiqueResult | null>(persisted?.result ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [hovered, setHovered] = useState<string | null>(null);
-  const [category, setCategory] = useState('');
+  const [category, setCategory] = useState(persisted?.category ?? '');
   const [editingCategory, setEditingCategory] = useState(false);
-  const [extraContext, setExtraContext] = useState('');
+  const [extraContext, setExtraContext] = useState(persisted?.extraContext ?? '');
   const [generating, setGenerating] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [tailoredResult, setTailoredResult] = useState<TailoredResult | null>(persisted?.tailoredResult ?? null);
+  const [activeTab, setActiveTab] = useState<'current' | 'tailored'>(persisted?.activeTab ?? 'current');
+  const [viewMode, setViewMode] = useState<'single' | 'compare'>(persisted?.viewMode ?? 'compare');
+  const [singleZoom, setSingleZoom] = useState(0.9);
+  const [currentZoom, setCurrentZoom] = useState(0.635);
+  const [tailoredZoom, setTailoredZoom] = useState(0.635);
+  const [devPasteText, setDevPasteText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nextDelay = useRiseDelay();
+
+  React.useEffect(() => {
+    if (!result) {
+      sessionStorage.removeItem(SESSION_KEY);
+      return;
+    }
+    const snapshot: PersistedCritiqueSession = {
+      result, tailoredResult, category, extraContext, activeTab, viewMode,
+    };
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify(snapshot));
+    } catch {
+      // Quota exceeded or storage unavailable (private browsing) — degrade to no persistence.
+    }
+  }, [result, tailoredResult, category, extraContext, activeTab, viewMode]);
 
   const flagByBulletId = React.useMemo(() => {
     const map: Record<string, CritiqueFlag> = {};
@@ -271,6 +565,33 @@ const CritiquePage: React.FC = () => {
     }
   }, [getToken]);
 
+  const submitResumeText = useCallback(async (text: string) => {
+    setLoading(true);
+    setError('');
+    try {
+      const token = await getToken();
+      const res = await fetch(`${API_BASE_URL}/api/dev/critique-resume-text`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ resume_text: text }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || `Server error ${res.status}`);
+      }
+      const data: CritiqueResult = await res.json();
+      setResult(data);
+      setCategory(data.detected_category);
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to critique resume.');
+    } finally {
+      setLoading(false);
+    }
+  }, [getToken]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) submitResume(f);
@@ -298,39 +619,31 @@ const CritiquePage: React.FC = () => {
   };
 
   const handleGenerate = async () => {
-    if (!file || !result) return;
+    if (!result) return;
+    const rewritable = result.critiques.filter((c) => c.severity !== 'green');
+    if (rewritable.length === 0) {
+      setError('Nothing flagged to rewrite — your resume is already strong as-is.');
+      return;
+    }
     setGenerating(true);
     setError('');
     try {
       const token = await getToken();
-      const flagged = result.critiques
-        .map((c) => {
-          const allBullets = [
-            ...result.experience.flatMap((e) => e.bullets),
-            ...result.projects.flatMap((p) => p.bullets),
-          ];
-          const bullet = allBullets.find((b) => b.id === c.bullet_id);
-          return bullet ? `- "${bullet.text}" — ${c.comment}` : null;
-        })
-        .filter(Boolean)
-        .join('\n');
-      const categoryLabel = DEPARTMENT_CATEGORIES.find((c) => c.id === category)?.label ?? category;
-      const jobDescription =
-        `Target industry: ${categoryLabel}\n\n` +
-        `Feedback to address:\n${flagged}\n\n` +
-        (extraContext.trim() ? `Additional context from candidate: ${extraContext.trim()}\n\n` : '') +
-        'Rewrite the flagged bullets using this feedback; keep everything already working as-is.';
+      // Only the fields the rewrite prompt needs — drop critiques/cached so the model
+      // isn't shown its own critique output nested inside the "resume data" it edits.
+      const { critiques: _critiques, cached: _cached, ...resumeOnly } = result;
 
-      const formData = new FormData();
-      formData.append('resume', file);
-      formData.append('job_title', 'Critique-based rewrite');
-      formData.append('company', categoryLabel);
-      formData.append('job_description', jobDescription);
-
-      const res = await fetch(`${API_BASE_URL}/api/tailor-resume`, {
+      const res = await fetch(`${API_BASE_URL}/api/critique-resume/rewrite`, {
         method: 'POST',
-        body: formData,
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          structured_resume: resumeOnly,
+          critiques: rewritable,
+          extra_context: extraContext,
+        }),
       });
       if (!res.ok) {
         if (res.status === 429) {
@@ -340,20 +653,35 @@ const CritiquePage: React.FC = () => {
         const text = await res.text();
         throw new Error(text || `Server error ${res.status}`);
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `resume_improved_${(result.name || 'resume').replace(/[^\w-]/g, '_')}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const data = await res.json();
+      setTailoredResult({
+        structured: data.structured_resume,
+        pdfBase64: data.pdf_base64,
+        rewrittenIds: data.rewritten_bullet_ids ?? [],
+      });
+      setActiveTab('tailored');
+      setViewMode('compare');
     } catch (e: any) {
       setError(e.message ?? 'Failed to generate improved resume.');
     } finally {
       setGenerating(false);
     }
+  };
+
+  const downloadTailoredPdf = () => {
+    if (!tailoredResult) return;
+    const byteChars = atob(tailoredResult.pdfBase64);
+    const byteNumbers = new Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([new Uint8Array(byteNumbers)], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `resume_tailored_${(result?.name || 'resume').replace(/[^\w-]/g, '_')}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   if (!isLoaded) {
@@ -455,6 +783,31 @@ const CritiquePage: React.FC = () => {
                 </div>
                 <input type="file" accept=".pdf" className="hidden" onChange={handleFileChange} disabled={loading} />
               </label>
+              {process.env.NODE_ENV !== 'production' && (
+                <details className="mt-3">
+                  <summary className="font-mono text-[10px] uppercase tracking-widest text-text-tertiary cursor-pointer">
+                    Dev: paste resume text instead
+                  </summary>
+                  <div className="mt-2 flex flex-col gap-2">
+                    <textarea
+                      value={devPasteText}
+                      onChange={(e) => setDevPasteText(e.target.value)}
+                      placeholder="Paste plain resume text here — bypasses PDF upload for local testing."
+                      className="w-full h-28 border border-lp-border p-2 text-xs font-mono"
+                      disabled={loading}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="self-start"
+                      disabled={loading || !devPasteText.trim()}
+                      onClick={() => submitResumeText(devPasteText)}
+                    >
+                      Critique pasted text
+                    </Button>
+                  </div>
+                </details>
+              )}
             </div>
           </div>
 
@@ -502,7 +855,11 @@ const CritiquePage: React.FC = () => {
   return (
     <div className="min-h-screen bg-bg text-text-primary font-sans" style={{ fontFamily: "'Source Sans 3', system-ui, sans-serif" }}>
       <style>{`@keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
-        @media (prefers-reduced-motion: reduce) { [style*="animation: rise"] { animation: none !important; opacity: 1 !important; transform: none !important; } }`}</style>
+        @keyframes pulseDot { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.55); opacity: 0.4; } }
+        @media (prefers-reduced-motion: reduce) {
+          [style*="animation: rise"], [style*="animation:rise"] { animation: none !important; opacity: 1 !important; transform: none !important; }
+          [style*="pulseDot"] { animation: none !important; }
+        }`}</style>
 
       {/* Minimal focused-task header — full site nav lives on the pre-upload screen above */}
       <header className="flex items-center justify-between px-9 py-4 border-b border-lp-border">
@@ -537,8 +894,8 @@ const CritiquePage: React.FC = () => {
         </div>
       )}
 
-      {/* Content row */}
-      {result && (
+      {/* Content row — critique review state (before a tailored version exists) */}
+      {result && !tailoredResult && (
         <div className="flex items-start gap-9 px-8 pt-11" style={{ justifyContent: 'safe center', paddingBottom: 110 }}>
           {/* Left column: three independent boxes */}
           <aside className="w-[248px] flex-none sticky top-9 flex flex-col gap-4">
@@ -777,6 +1134,162 @@ const CritiquePage: React.FC = () => {
 
           {/* Right rail reserved for hover comments */}
           <div className="w-[300px] flex-none" aria-hidden="true" />
+        </div>
+      )}
+
+      {/* Result state — a tailored version exists: Current/Tailored tabs + Single/Compare */}
+      {result && tailoredResult && (
+        <div className="max-w-[1060px] mx-auto px-6" style={{ paddingTop: 26, paddingBottom: 100 }}>
+          <div
+            className="flex items-end justify-between gap-5 flex-wrap"
+            style={{ borderBottom: '1px solid rgba(31,27,22,0.14)', marginBottom: 8 }}
+          >
+            <div className="flex items-end gap-0.5">
+              <button
+                onClick={() => setActiveTab('current')}
+                className="inline-flex items-center gap-2 text-sm"
+                style={{
+                  padding: '10px 16px 11px',
+                  background: 'none', border: 'none',
+                  borderBottom: activeTab === 'current' && viewMode === 'single' ? '2px solid var(--lp-text-primary)' : '2px solid transparent',
+                  marginBottom: -1,
+                  fontWeight: activeTab === 'current' && viewMode === 'single' ? 700 : 600,
+                  color: activeTab === 'current' && viewMode === 'single' ? 'var(--lp-text-primary)' : 'var(--lp-text-tertiary)',
+                  cursor: 'pointer',
+                }}
+              >
+                Current Resume
+              </button>
+              <button
+                onClick={() => setActiveTab('tailored')}
+                className="inline-flex items-center gap-2 text-sm"
+                style={{
+                  padding: '10px 16px 11px',
+                  background: 'none', border: 'none',
+                  borderBottom: activeTab === 'tailored' && viewMode === 'single' ? '2px solid var(--lp-text-primary)' : '2px solid transparent',
+                  marginBottom: -1,
+                  fontWeight: activeTab === 'tailored' && viewMode === 'single' ? 700 : 600,
+                  color: activeTab === 'tailored' && viewMode === 'single' ? 'var(--lp-text-primary)' : 'var(--lp-text-tertiary)',
+                  cursor: 'pointer',
+                }}
+              >
+                <span>Tailored Resume</span>
+                <span style={{ position: 'relative', display: 'inline-flex', width: 7, height: 7 }}>
+                  <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'hsl(142 72% 45%)', animation: 'pulseDot 1.8s ease-in-out infinite' }} />
+                  <span style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'hsl(142 72% 45%)' }} />
+                </span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3" style={{ paddingBottom: 9 }}>
+              <div className="inline-flex" style={{ padding: 3, background: '#E4E1D8', border: '1px solid rgba(31,27,22,0.10)', borderRadius: 9 }}>
+                <button
+                  onClick={() => setViewMode('single')}
+                  className="text-[13px] font-semibold"
+                  style={{
+                    padding: '6px 14px', borderRadius: 6, border: 'none',
+                    background: viewMode === 'single' ? '#FDFCFA' : 'transparent',
+                    boxShadow: viewMode === 'single' ? '0 1px 2px rgba(31,27,22,0.12)' : 'none',
+                    color: viewMode === 'single' ? 'var(--lp-text-primary)' : 'var(--lp-text-secondary)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Single
+                </button>
+                <button
+                  onClick={() => setViewMode('compare')}
+                  className="text-[13px] font-semibold"
+                  style={{
+                    padding: '6px 14px', borderRadius: 6, border: 'none',
+                    background: viewMode === 'compare' ? '#FDFCFA' : 'transparent',
+                    boxShadow: viewMode === 'compare' ? '0 1px 2px rgba(31,27,22,0.12)' : 'none',
+                    color: viewMode === 'compare' ? 'var(--lp-text-primary)' : 'var(--lp-text-secondary)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Compare
+                </button>
+              </div>
+              <button
+                onClick={downloadTailoredPdf}
+                className="inline-flex items-center gap-2 text-[13px] font-semibold"
+                style={{ height: 34, padding: '0 15px', background: 'var(--lp-surface)', border: '1px solid rgba(31,27,22,0.16)', borderRadius: 9, color: 'var(--lp-text-primary)', cursor: 'pointer' }}
+              >
+                <Download className="h-3.5 w-3.5" />
+                Download PDF
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3.5 flex-wrap" style={{ minHeight: 22, marginBottom: 22 }}>
+            <div className="text-[13px]" style={{ color: 'var(--lp-text-secondary)' }}>
+              {viewMode === 'compare'
+                ? `${tailoredResult.rewrittenIds.length} bullet${tailoredResult.rewrittenIds.length === 1 ? '' : 's'} rewritten to lead with outcomes and add metrics — everything else kept as-is.`
+                : activeTab === 'tailored'
+                  ? 'Your tailored resume — rewritten lines are highlighted in green.'
+                  : `Your original resume — the ${tailoredResult.rewrittenIds.length} line${tailoredResult.rewrittenIds.length === 1 ? '' : 's'} the critique flagged are highlighted.`}
+            </div>
+            {viewMode === 'compare' && (
+              <div className="flex items-center gap-3.5 text-xs" style={{ color: 'var(--lp-text-tertiary)' }}>
+                <span className="inline-flex items-center gap-1.5">
+                  <span style={{ width: 16, height: 10, borderRadius: 2, background: 'hsl(38 92% 55% / 0.18)', boxShadow: 'inset 2px 0 0 hsl(38 92% 55%)' }} />
+                  original line
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span style={{ width: 16, height: 10, borderRadius: 2, background: 'hsl(142 72% 45% / 0.16)', boxShadow: 'inset 2px 0 0 hsl(142 72% 45%)' }} />
+                  rewritten line
+                </span>
+              </div>
+            )}
+          </div>
+
+          {viewMode === 'single' ? (
+            <div className="flex flex-col items-center" style={{ gap: 11, animation: 'rise 0.4s ease both' }}>
+              <ZoomControl zoom={singleZoom} onChange={setSingleZoom} />
+              <div style={{ zoom: singleZoom }}>
+                <ResumeDiffPage
+                  blocks={buildDiffBlocks(result, tailoredResult.structured, tailoredResult.rewrittenIds)}
+                  variant={activeTab}
+                  showChanges
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-center items-start gap-[30px]" style={{ animation: 'rise 0.4s ease both' }}>
+              <div className="flex flex-col" style={{ gap: 11 }}>
+                <div className="flex items-center justify-between gap-2" style={{ paddingLeft: 2 }}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold uppercase" style={{ letterSpacing: '0.1em', color: 'var(--lp-text-tertiary)' }}>Current</span>
+                    <span className="text-[11px]" style={{ color: 'var(--lp-text-tertiary)' }}>— before critique</span>
+                  </div>
+                  <ZoomControl zoom={currentZoom} onChange={setCurrentZoom} />
+                </div>
+                <div style={{ zoom: currentZoom, borderRadius: 2 }}>
+                  <ResumeDiffPage
+                    blocks={buildDiffBlocks(result, tailoredResult.structured, tailoredResult.rewrittenIds)}
+                    variant="current"
+                    showChanges
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col" style={{ gap: 11 }}>
+                <div className="flex items-center justify-between gap-2" style={{ paddingLeft: 2 }}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold uppercase" style={{ letterSpacing: '0.1em', color: 'hsl(142 72% 34%)' }}>Tailored ✨</span>
+                    <span className="text-[11px]" style={{ color: 'var(--lp-text-tertiary)' }}>— rewritten from your feedback</span>
+                  </div>
+                  <ZoomControl zoom={tailoredZoom} onChange={setTailoredZoom} />
+                </div>
+                <div style={{ zoom: tailoredZoom, borderRadius: 2, boxShadow: '0 0 0 2px hsl(142 72% 45% / 0.28)' }}>
+                  <ResumeDiffPage
+                    blocks={buildDiffBlocks(result, tailoredResult.structured, tailoredResult.rewrittenIds)}
+                    variant="tailored"
+                    showChanges
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

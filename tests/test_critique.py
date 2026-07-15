@@ -376,3 +376,142 @@ class TestCritiqueEndpoint:
         body = resp.json()
         assert "critique" in body
         assert body["critique"]["limit"] == 3
+
+
+# ---------------------------------------------------------------------------
+# /api/critique-resume/rewrite — endpoint integration tests
+# ---------------------------------------------------------------------------
+
+REWRITTEN_PAYLOAD = {
+    **{k: v for k, v in SAMPLE_CRITIQUE_PAYLOAD.items() if k != "critiques"},
+    "experience": [
+        {
+            "company": "Acme Corp",
+            "location": "San Francisco, CA",
+            "title": "Software Engineering Intern",
+            "dates": "May 2024 - Aug 2024",
+            "bullets": [
+                {"id": "b1", "text": "Utilized Python to help build features"},  # unchanged (not critiqued)
+                {"id": "b2", "text": "Reduced query latency from 190ms to 40ms by adding a Redis cache serving 2M req/day"},  # rewritten
+            ],
+        }
+    ],
+}
+
+
+class TestCritiqueRewriteEndpoint:
+    def _critiques(self):
+        return [{"bullet_id": "b2", "severity": "yellow", "comment": "needs a before/after number"}]
+
+    def test_requires_structured_resume(self, client):
+        resp = client.post("/api/critique-resume/rewrite", json={"critiques": self._critiques()})
+        assert resp.status_code == 400
+
+    def test_requires_non_green_critiques(self, client):
+        resp = client.post(
+            "/api/critique-resume/rewrite",
+            json={
+                "structured_resume": SAMPLE_CRITIQUE_PAYLOAD,
+                "critiques": [{"bullet_id": "b2", "severity": "green", "comment": "great as-is"}],
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_success_returns_rewrite_and_pdf(self, client):
+        with patch(
+            "resume_critique.critique_resume.apply_critique_rewrite", return_value=REWRITTEN_PAYLOAD
+        ) as mock_rewrite, patch(
+            "resume_tailor.tailor_resume.compile_resume_json_to_pdf",
+            return_value=(b"%PDF-fake-bytes", {"pages": 1}),
+        ) as mock_compile:
+            resp = client.post(
+                "/api/critique-resume/rewrite",
+                json={
+                    "structured_resume": SAMPLE_CRITIQUE_PAYLOAD,
+                    "critiques": self._critiques(),
+                    "extra_context": "targeting backend roles",
+                },
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["rewritten_bullet_ids"] == ["b2"]
+        assert body["structured_resume"]["experience"][0]["bullets"][1]["text"].startswith("Reduced query latency")
+        import base64
+        assert base64.b64decode(body["pdf_base64"]) == b"%PDF-fake-bytes"
+        mock_rewrite.assert_called_once()
+        mock_compile.assert_called_once()
+
+        from job_database import SessionLocal
+        from quota import get_tailor_quota_status
+
+        db = SessionLocal()
+        try:
+            status = get_tailor_quota_status(db, "test-user-id")
+        finally:
+            db.close()
+        assert status["used"] == 1  # consumes the TAILOR quota, not the critique quota
+
+    def test_green_only_critiques_are_filtered_out_before_rewrite(self, client):
+        with patch(
+            "resume_critique.critique_resume.apply_critique_rewrite", return_value=REWRITTEN_PAYLOAD
+        ) as mock_rewrite, patch(
+            "resume_tailor.tailor_resume.compile_resume_json_to_pdf",
+            return_value=(b"%PDF-fake-bytes", {}),
+        ):
+            client.post(
+                "/api/critique-resume/rewrite",
+                json={
+                    "structured_resume": SAMPLE_CRITIQUE_PAYLOAD,
+                    "critiques": [
+                        {"bullet_id": "b1", "severity": "green", "comment": "exemplary"},
+                        {"bullet_id": "b2", "severity": "yellow", "comment": "needs a number"},
+                    ],
+                },
+            )
+
+        sent_critiques = mock_rewrite.call_args[0][1]
+        assert [c["bullet_id"] for c in sent_critiques] == ["b2"]
+
+    def test_weekly_tailor_quota_exceeded_returns_429(self, client):
+        from job_database import SessionLocal
+        from quota import record_tailor_request, WEEKLY_TAILOR_LIMIT
+
+        db = SessionLocal()
+        try:
+            for _ in range(WEEKLY_TAILOR_LIMIT):
+                record_tailor_request(db, "test-user-id", "job", "company")
+            db.commit()
+        finally:
+            db.close()
+
+        with patch("resume_critique.critique_resume.apply_critique_rewrite", return_value=REWRITTEN_PAYLOAD), \
+             patch("resume_tailor.tailor_resume.compile_resume_json_to_pdf", return_value=(b"%PDF", {})):
+            resp = client.post(
+                "/api/critique-resume/rewrite",
+                json={"structured_resume": SAMPLE_CRITIQUE_PAYLOAD, "critiques": self._critiques()},
+            )
+
+        assert resp.status_code == 429
+        assert resp.json()["detail"]["error"] == "weekly_quota_exceeded"
+
+    def test_rewrite_error_does_not_record_quota(self, client):
+        with patch(
+            "resume_critique.critique_resume.apply_critique_rewrite", side_effect=RuntimeError("boom")
+        ):
+            resp = client.post(
+                "/api/critique-resume/rewrite",
+                json={"structured_resume": SAMPLE_CRITIQUE_PAYLOAD, "critiques": self._critiques()},
+            )
+
+        assert resp.status_code == 500
+
+        from job_database import SessionLocal
+        from quota import get_tailor_quota_status
+
+        db = SessionLocal()
+        try:
+            status = get_tailor_quota_status(db, "test-user-id")
+        finally:
+            db.close()
+        assert status["used"] == 0

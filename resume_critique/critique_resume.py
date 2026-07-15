@@ -128,3 +128,140 @@ def critique_resume_to_json(resume_text: str, target_category=None, system_promp
         if isinstance(c, dict) and c.get("severity") in ("red", "yellow", "green") and c.get("bullet_id")
     ]
     return data
+
+
+REWRITE_SYSTEM_PROMPT = """You are rewriting SPECIFIC flagged bullets on a resume based on critique \
+feedback and optional candidate context. This is a targeted edit, not a full tailoring pass against a \
+job description — most of the resume must come back byte-for-byte unchanged.
+
+You will receive the full structured resume (every experience/project bullet has an "id") and a list \
+of critiques ({bullet_id, severity, comment}) naming exactly which bullets need rewriting.
+
+RULES (strict):
+1. For every bullet whose id does NOT appear in the critiques list: copy its "text" field character-for-
+   character unchanged. Do not rephrase, do not fix typos, do not touch it in any way.
+2. For every bullet whose id DOES appear in the critiques list: rewrite it to directly address that
+   exact critique comment. Stay strictly truthful — never invent facts, numbers, clients, systems,
+   integrations, protocols, teams, or scope beyond what the original bullet or the candidate's own
+   added context supports.
+3. If the candidate provided additional context, use it only to inform tone/emphasis on the bullets
+   you are rewriting — never to fabricate a new claim that isn't grounded in the original resume.
+
+GROUNDING CHECK (this is the rule most often violated — apply it to every rewritten bullet before you
+finalize the JSON): every specific noun in a rewritten bullet — a system name, a third-party API, a
+protocol usage ("via gRPC", "published to Kafka"), a team count, a percentage, a duration, a user
+count — must trace back verbatim or near-verbatim to either (a) the original bullet's own wording, or
+(b) a sentence in the candidate's extra_context that names that exact fact. "Multi-service integration:
+gRPC, Kafka, Kubernetes, Terraform, GitHub Actions" tells you which tools were touched, NOT what was
+built with them, who consumed the output, or what the measured impact was — you may NOT invent a
+downstream integration ("connected to a third-party logistics provider's SOAP API"), a consumer
+("published events to 3 internal teams"), or a metric ("reducing setup time by 45 minutes") to fill
+that gap. A tool-list bullet with no extra_context stays a tool-list bullet, reframed as an honest
+sentence about the technical scope of the role (e.g. "Used gRPC, Kafka, Kubernetes, Terraform, and
+GitHub Actions to support service-to-service communication and deployment for the platform") — not a
+fabricated project. If the honest rewrite is still modest, that is the correct output: a truthful
+Zone-A bullet beats a fabricated Zone-B one. When in doubt about whether a specific detail is grounded,
+leave it out.
+
+WHEN THE CRITIQUE ASKS FOR SOMETHING YOU DON'T HAVE: some critique comments say things like "add an
+outcome number" or "how many users?" or "what problem did it solve?" — these are asking the *human* to
+supply that detail, not asking you to invent a plausible-sounding one. If that number, scope detail, or
+mechanism (e.g. "JWT tokens", "deck creation and progress tracking", "study streak") is not already in
+the original bullet, a sibling bullet in the same entry, or extra_context, do NOT add it just because
+the critique asked for it. Tighten the verb and phrasing instead — e.g. "Implemented a leaderboard
+feature" can honestly become "Designed and implemented a leaderboard feature to surface top-performing
+users," but NOT "...by study streak, encouraging daily engagement" unless "study streak" or "daily
+engagement" appears in the resume or extra_context. A bullet that still reads as Zone A after your best
+truthful attempt is the correct, honest output — do not close the gap with invention.
+
+This also covers inferring "typical" features of a described product — e.g. assuming a flashcard app
+must have "deck creation" and "card review scheduling," or that any full-stack app must have "user
+authentication," just because those are common in that category of product. Only claim a specific
+feature, component, or mechanism if it is explicitly named somewhere in the resume (this bullet or a
+sibling bullet in the same entry) or in extra_context — plausible-for-the-category is not grounded. A
+sibling bullet naming the product's *category* (e.g. "a spaced-repetition flashcard web app") grounds
+you rewriting THIS bullet's tech-stack list into a sentence about that category, but it does NOT grant
+you license to name specific sub-features ("deck creation", "authentication", "scheduling logic") that
+no bullet actually lists — describe the stack's role at the level of specificity the resume already
+gives you, no deeper. "User authentication" and "session management" are your own most common invented
+fillers for a frontend+backend tech-list bullet with no stated feature — do not reach for them (or any
+other named feature/component) unless the word appears in this entry's other bullets. If every bullet
+in the entry is just a tech-stack list with zero named feature anywhere, the honest rewrite names ONLY
+the technologies and the general category of work (e.g. "built the frontend and backend for the
+[product, from a sibling bullet] using X, Y, Z") — it does not name a specific capability inside that
+product.
+
+4. Preserve the exact same JSON structure: same sections, same entries in the same order, same bullet
+   ids, same non-bullet fields (name, email, education, skills, detected_category, etc.) unchanged.
+5. Do not add or remove bullets, entries, or sections.
+
+Return ONLY valid JSON (no markdown fences), same shape as the input resume (bullets keep their "id"):
+{
+  "name": "...", "email": "...", "phone": "...", "website": "...", "github": "...", "linkedin": "...",
+  "education": [{"school": "...", "location": "...", "degree": "...", "dates": "..."}],
+  "experience": [
+    {"company": "...", "location": "...", "title": "...", "dates": "...",
+     "bullets": [{"id": "b1", "text": "..."}]}
+  ],
+  "projects": [{"name": "...", "dates": "...", "bullets": [{"id": "b4", "text": "..."}]}],
+  "skills": {"...": "..."},
+  "detected_category": "..."
+}"""
+
+
+def apply_critique_rewrite(
+    structured_resume: dict, critiques: list, extra_context: str = "", system_prompt=None, temperature=None
+) -> dict:
+    """Single Sonnet call: rewrite ONLY the flagged bullets, leave everything else untouched.
+
+    Unlike resume_tailor.tailor_resume_to_json (which actively rewrites nearly every bullet to
+    align with a job description), this targets exactly the bullet_ids in `critiques` — the
+    caller can compute which bullets changed just by checking membership in that same list,
+    no fuzzy text diffing required.
+    """
+    sys_p = system_prompt if system_prompt is not None else REWRITE_SYSTEM_PROMPT
+    client = anthropic.Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+
+    user_msg = (
+        "Structured resume:\n" + json.dumps(structured_resume) +
+        "\n\nCritiques (bullets to rewrite):\n" + json.dumps(critiques)
+    )
+    if extra_context and extra_context.strip():
+        user_msg += "\n\nAdditional context from candidate: " + extra_context.strip()
+
+    create_kwargs = dict(
+        model="claude-sonnet-4-5-20250929",
+        max_tokens=6000,
+        system=sys_p,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    if temperature is not None:
+        create_kwargs["temperature"] = temperature
+    response = client.messages.create(**create_kwargs)
+    raw = response.content[0].text.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        stop = response.stop_reason
+        raise RuntimeError(
+            f"Rewrite JSON truncated (stop_reason={stop!r}): {e}. "
+            "Increase max_tokens or shorten the resume."
+        ) from e
+
+
+def to_compile_schema(structured_resume: dict) -> dict:
+    """Convert critique's {id, text} bullet objects into the plain-string bullet lists
+    that resume_tailor.compile_resume_json_to_pdf / inject_into_template expect."""
+    data = dict(structured_resume)
+    for section in ("experience", "projects"):
+        entries = []
+        for entry in data.get(section, []):
+            entry = dict(entry)
+            entry["bullets"] = [b["text"] if isinstance(b, dict) else b for b in entry.get("bullets", [])]
+            entries.append(entry)
+        data[section] = entries
+    return data
