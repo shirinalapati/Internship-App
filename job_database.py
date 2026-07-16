@@ -229,6 +229,31 @@ class RemoteCompileLog(Base):
     __table_args__ = (Index('idx_remote_compile_user_time', 'user_id', 'requested_at'),)
 
 
+class CritiqueRequestLog(Base):
+    """Append-only log of successful Critique requests, used for the weekly quota.
+    A cache hit does NOT write a row here — repeat critiques of the same resume/category
+    are free, mirroring how remote-compile cache hits don't burn quota either."""
+    __tablename__ = "critique_request_log"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(255), nullable=False, index=True)
+    requested_at = Column(DateTime, default=_utcnow, nullable=False, index=True)
+    __table_args__ = (Index('idx_critique_user_time', 'user_id', 'requested_at'),)
+
+
+class CritiqueCache(Base):
+    """Cache for Critique results, keyed by user + resume hash + category.
+    Mirrors ResumeCache's 30-day TTL pattern."""
+    __tablename__ = "critique_cache"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(255), nullable=False, index=True)
+    resume_hash = Column(String(255), nullable=False, index=True)
+    category = Column(String(50), nullable=False, index=True)
+    result = Column(Text, nullable=False)  # JSON: structured_resume + critiques + detected_category
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    __table_args__ = (Index('idx_critique_cache_lookup', 'user_id', 'resume_hash', 'category'),)
+
+
 class UserAttribution(Base):
     """First-touch UTM attribution per user. One row per Clerk user_id — never updated."""
     __tablename__ = "user_attribution"
@@ -1244,6 +1269,46 @@ def set_resume_cache(user_id: str, resume_hash: str, results: list, skills: list
     except Exception as e:
         db.rollback()
         logger.warning(f"Failed to save resume cache: {e}")
+    finally:
+        db.close()
+
+
+def get_critique_cache(user_id: str, resume_hash: str, category: str) -> Optional[Dict]:
+    """Returns cached Critique result dict, or None if miss/expired."""
+    db = get_db()
+    try:
+        entry = db.query(CritiqueCache).filter(
+            CritiqueCache.user_id == user_id,
+            CritiqueCache.resume_hash == resume_hash,
+            CritiqueCache.category == category,
+            CritiqueCache.expires_at > datetime.utcnow()
+        ).first()
+        return json.loads(entry.result) if entry else None
+    finally:
+        db.close()
+
+
+def set_critique_cache(user_id: str, resume_hash: str, category: str, result: dict) -> None:
+    """Upsert Critique cache entry with 30-day TTL."""
+    db = get_db()
+    try:
+        db.query(CritiqueCache).filter(
+            CritiqueCache.user_id == user_id,
+            CritiqueCache.resume_hash == resume_hash,
+            CritiqueCache.category == category,
+        ).delete()
+        entry = CritiqueCache(
+            user_id=user_id,
+            resume_hash=resume_hash,
+            category=category,
+            result=json.dumps(result),
+            expires_at=datetime.utcnow() + timedelta(days=30)
+        )
+        db.add(entry)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Failed to save critique cache: {e}")
     finally:
         db.close()
 

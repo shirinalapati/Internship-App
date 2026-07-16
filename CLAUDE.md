@@ -5,6 +5,15 @@ A full-stack web app that matches students to software internships using AI. Use
 
 ---
 
+## Commit & PR Policy (hard rule)
+- **Never add `Co-Authored-By: Claude` (or any Claude/Anthropic co-author trailer) to any commit.**
+- **Never add "Generated with Claude Code" or any similar attribution line to any commit message or PR description/body.**
+- This applies to every commit and every PR in this repo, no exceptions, regardless of default tooling behavior.
+- Every new feature ships as its own PR branched from `dev` (never `main`) — see [PR base branch rule].
+- **Before pushing any frontend-visible change to a PR, test it yourself via the claude-in-chrome browser tools first** — click through the actual affected flow (not just `tsc`/build/pytest) and only push once it visibly works. If the flow requires uploading a file and `file_upload` is broken in the current environment, add a dev-only paste-text (or otherwise upload-free) fallback gated to non-production instead of skipping verification.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
