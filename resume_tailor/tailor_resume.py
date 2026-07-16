@@ -388,9 +388,18 @@ def _href(url: str, display: str) -> str:
     return f"\\href{{{url}}}{{{display}}}"
 
 
-def inject_into_template(data: dict) -> str:
-    """Fill template.tex placeholders with the structured JSON data."""
-    template_path = os.path.join(os.path.dirname(__file__), "template.tex")
+# template_id -> .tex file. "classic" is the original, untouched template — its
+# path and output must never change so the compile-parity guarantee (shared by
+# value with internship-mcp) holds for every caller that doesn't pass template_id.
+TEMPLATE_REGISTRY: dict[str, str] = {
+    "classic": os.path.join(os.path.dirname(__file__), "template.tex"),
+    "modern": os.path.join(os.path.dirname(__file__), "templates", "modern", "template.tex"),
+}
+
+
+def inject_into_template(data: dict, template_id: str = "classic") -> str:
+    """Fill a template's placeholders with the structured JSON data."""
+    template_path = TEMPLATE_REGISTRY.get(template_id, TEMPLATE_REGISTRY["classic"])
     with open(template_path, "r", encoding="utf-8") as f:
         template = f.read()
 
@@ -904,7 +913,7 @@ def rewrite_widowed_bullets(data: dict, widows, cap: int, resume_text: str, rewr
     return new_data if changed else data
 
 
-def _lock_font(data: dict):
+def _lock_font(data: dict, template_id: str = "classic"):
     """Lock the font (and initial preset), growing above 11pt for sparse pages.
 
     Returns (pdf, font, preset). preset is always 'tight' from this function;
@@ -916,7 +925,7 @@ def _lock_font(data: dict):
       3. If 11pt fits but fill < UNDERFILL_RATIO → try larger sizes (12, 14),
          locking the largest that still fits ≤1 page.
     """
-    latex = inject_into_template(data)
+    latex = inject_into_template(data, template_id)
     anchor_pdf = _compile_at(latex, _ANCHOR_FONT, "tight")
 
     if _count_pdf_pages(anchor_pdf) > 1:
@@ -944,9 +953,9 @@ def _lock_font(data: dict):
     return anchor_pdf, _ANCHOR_FONT, "tight"
 
 
-def _recompile_locked(data: dict, font: int, preset: str = "tight"):
+def _recompile_locked(data: dict, font: int, preset: str = "tight", template_id: str = "classic"):
     """Recompile at the locked font and spacing preset, stepping down one size if spilled."""
-    latex = inject_into_template(data)
+    latex = inject_into_template(data, template_id)
     pdf = _compile_at(latex, font, preset)
     if _count_pdf_pages(pdf) > 1:
         idx = FONT_SIZES.index(font)
@@ -956,7 +965,9 @@ def _recompile_locked(data: dict, font: int, preset: str = "tight"):
     return pdf, font
 
 
-def refine_to_no_widows(data: dict, resume_text: str, rewrite_fn, max_rounds: int = 3) -> bytes:
+def refine_to_no_widows(
+    data: dict, resume_text: str, rewrite_fn, max_rounds: int = 3, template_id: str = "classic"
+) -> bytes:
     """Lock the font, then close the loop: measure → rewrite → recompile, with a
     free deterministic backstop that guarantees full-width bullets. Finally, stretch
     spacing if the page is still underfilled.
@@ -978,7 +989,7 @@ def refine_to_no_widows(data: dict, resume_text: str, rewrite_fn, max_rounds: in
     loosest that keeps the PDF on one page. Uses pdfplumber only — independent of
     the pdftotext-based widow path.
     """
-    pdf, font, preset = _lock_font(data)
+    pdf, font, preset = _lock_font(data, template_id)
 
     # ---- Stage 1: LLM extend rounds (preferred — keeps content) ----
     try:
@@ -1005,7 +1016,7 @@ def refine_to_no_widows(data: dict, resume_text: str, rewrite_fn, max_rounds: in
             if new_data is data:
                 break  # rewrite_fn returned no changes — stop early
             data = new_data
-            pdf, font = _recompile_locked(data, font, preset)
+            pdf, font = _recompile_locked(data, font, preset, template_id)
 
         # ---- Stage 2: deterministic backstop — guarantee no orphan below the floor ----
         for _ in range(2):  # at most 2 passes (a trim can change wrapping once)
@@ -1026,7 +1037,7 @@ def refine_to_no_widows(data: dict, resume_text: str, rewrite_fn, max_rounds: in
                 data[section][j]["bullets"][k] = _trim_to_single_line(
                     data[section][j]["bullets"][k], cap
                 )
-            pdf, font = _recompile_locked(data, font, preset)
+            pdf, font = _recompile_locked(data, font, preset, template_id)
 
     except _PdftotextUnavailable as exc:
         logger.warning(
@@ -1036,7 +1047,7 @@ def refine_to_no_widows(data: dict, resume_text: str, rewrite_fn, max_rounds: in
     # ---- Stage 3: spacing stretch (pdfplumber only — independent of pdftotext path) ----
     # Walk tight → normal → relaxed, taking the loosest preset that keeps 1 page.
     if _count_pdf_pages(pdf) == 1 and _page1_fill_ratio(pdf) < UNDERFILL_RATIO:
-        latex_for_stretch = inject_into_template(data)
+        latex_for_stretch = inject_into_template(data, template_id)
         for try_preset in ("normal", "relaxed"):
             candidate = _compile_at(latex_for_stretch, font, try_preset)
             if _count_pdf_pages(candidate) <= 1:
@@ -1051,7 +1062,11 @@ def refine_to_no_widows(data: dict, resume_text: str, rewrite_fn, max_rounds: in
 
 
 def tailor_resume(
-    file_content: bytes, job_title: str, company: str, job_description: str
+    file_content: bytes,
+    job_title: str,
+    company: str,
+    job_description: str,
+    template_id: str = "classic",
 ) -> bytes:
     text = extract_text_from_pdf(file_content)
     if not text.strip():
@@ -1059,7 +1074,9 @@ def tailor_resume(
     data = tailor_resume_to_json(text, job_title, company, job_description)
     data = _deduplicate_bullets(data)
     data = _repair_bullets(data, text)
-    return refine_to_no_widows(data, text, rewrite_fn=_batch_widow_rewrite)
+    return refine_to_no_widows(
+        data, text, rewrite_fn=_batch_widow_rewrite, template_id=template_id
+    )
 
 
 # ---------------------------------------------------------------------------

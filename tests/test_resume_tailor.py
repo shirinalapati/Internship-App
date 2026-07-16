@@ -14,6 +14,7 @@ import pytest
 
 from resume_tailor.tailor_resume import (
     FONT_SIZES,
+    TEMPLATE_REGISTRY,
     _count_pdf_pages,
     _escape_latex,
     _href,
@@ -117,6 +118,50 @@ class TestInjectIntoTemplate:
         latex = inject_into_template(data)
         # Should not raise; projects section just becomes empty string
         assert "{{PROJECTS}}" not in latex
+
+
+# ---------------------------------------------------------------------------
+# Template selection (template_id) — resume templates feature
+# ---------------------------------------------------------------------------
+
+class TestTemplateSelection:
+    def test_registry_has_classic_and_modern(self):
+        assert set(TEMPLATE_REGISTRY) == {"classic", "modern"}
+
+    def test_default_matches_explicit_classic(self, sample_resume_data):
+        """Callers that never pass template_id must get exactly the classic
+        template — this is the compile-parity guarantee for the MCP's
+        shared-by-value compile_resume_json_to_pdf, which never passes
+        template_id at all."""
+        assert inject_into_template(sample_resume_data) == inject_into_template(
+            sample_resume_data, "classic"
+        )
+
+    def test_unknown_template_id_falls_back_to_classic(self, sample_resume_data):
+        assert inject_into_template(sample_resume_data, "bogus-id") == inject_into_template(
+            sample_resume_data, "classic"
+        )
+
+    def test_modern_renders_same_content_as_classic(self, sample_resume_data):
+        classic = inject_into_template(sample_resume_data, "classic")
+        modern = inject_into_template(sample_resume_data, "modern")
+        assert classic != modern
+        for expected in ("Jane Doe", "jane@example.com", "Acme Corp", "Python", "InternTracker"):
+            assert expected in modern
+
+    def test_modern_preserves_font_size_placeholder(self, sample_resume_data):
+        latex = inject_into_template(sample_resume_data, "modern")
+        assert "{{FONT_SIZE}}" in latex
+
+    def test_modern_uses_same_bullet_item_structure(self, sample_resume_data):
+        """The widow/font-lock measurement code assumes plain \\item bullets —
+        modern must reuse the same Python-built itemize blocks as classic."""
+        classic = inject_into_template(sample_resume_data, "classic")
+        modern = inject_into_template(sample_resume_data, "modern")
+        classic_items = [l for l in classic.splitlines() if l.strip().startswith("\\item")]
+        modern_items = [l for l in modern.splitlines() if l.strip().startswith("\\item")]
+        assert classic_items == modern_items
+        assert classic_items  # sanity: sample data actually has bullets
 
 
 # ---------------------------------------------------------------------------
