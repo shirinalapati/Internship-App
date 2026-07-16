@@ -1,0 +1,44 @@
+\documentclass[{{FONT_SIZE}}pt,letterpaper]{extarticle}
+\usepackage[margin=0.5in]{geometry}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage[expansion=true,protrusion=true]{microtype}
+\usepackage{xcolor}
+\usepackage{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+
+\definecolor{accent}{HTML}{2563EB}
+
+\hypersetup{colorlinks=true,urlcolor=accent,linkcolor=black}
+
+% Section formatting — bold accent-colored heading with matching rule
+\titleformat{\section}{\large\bfseries\color{accent}}{}{0em}{}[{\color{accent}\titlerule}]
+\titlespacing{\section}{0pt}{{{SEC_BEFORE}}}{{{SEC_AFTER}}}
+
+\setlength{\parskip}{{{PARSKIP}}}
+\pagestyle{empty}
+
+\begin{document}
+
+% Header
+\begin{center}
+  {\huge \textbf{{{NAME}}}} \\[2pt]
+  {\color{accent}\rule{0.9\linewidth}{1pt}} \\[{{HEADER_SKIP}}]
+  {{PHONE}} $|$ {{EMAIL}} $|$ {{WEBSITE}} $|$ {{GITHUB}} $|$ {{LINKEDIN}}
+\end{center}
+
+\section{Education}
+{{EDUCATION}}
+
+\section{Experience}
+{{EXPERIENCE_BULLETS}}
+
+\section{Projects}
+{{PROJECTS}}
+
+\section{Technical Skills}
+{{SKILLS}}
+
+\end{document}

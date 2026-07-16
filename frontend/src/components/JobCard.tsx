@@ -18,6 +18,7 @@ const JobCard: React.FC<JobCardProps> = ({ job, isNewResult = false, resumeFile,
   const [isSaving, setIsSaving] = useState(false);
   const [tailorError, setTailorError] = useState('');
   const [saveError, setSaveError] = useState('');
+  const [templateId, setTemplateId] = useState<'classic' | 'modern'>('classic');
 
   const formatRelativeReset = (date: Date): string => {
     const diffMs = date.getTime() - Date.now();
@@ -40,6 +41,7 @@ const JobCard: React.FC<JobCardProps> = ({ job, isNewResult = false, resumeFile,
       // is sent as a fallback for results that predate job_hash.
       formData.append('job_hash', job.job_hash || '');
       formData.append('job_description', job.description || '');
+      formData.append('template_id', templateId);
 
       const response = await fetch(`${apiBaseUrl}/api/tailor-resume`, {
         method: 'POST',
@@ -341,13 +343,33 @@ const JobCard: React.FC<JobCardProps> = ({ job, isNewResult = false, resumeFile,
             </button>
           )}
           {resumeFile && (
-            <button
-              onClick={handleTailorResume}
-              disabled={isTailoring}
-              className="text-ia hover:text-ia-hover text-xs font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ia focus-visible:ring-offset-2 focus-visible:ring-offset-bg rounded"
-            >
-              {isTailoring ? 'Tailoring...' : 'Tailor Resume for This Job'}
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="inline-flex border border-text-primary/20 text-[10px] font-mono">
+                {(['classic', 'modern'] as const).map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setTemplateId(id)}
+                    disabled={isTailoring}
+                    aria-pressed={templateId === id}
+                    className={`px-2 py-1 capitalize transition-colors disabled:opacity-50 ${
+                      templateId === id
+                        ? 'bg-text-primary text-bg'
+                        : 'text-text-primary/60 hover:text-text-primary'
+                    }`}
+                  >
+                    {id}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={handleTailorResume}
+                disabled={isTailoring}
+                className="text-ia hover:text-ia-hover text-xs font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ia focus-visible:ring-offset-2 focus-visible:ring-offset-bg rounded"
+              >
+                {isTailoring ? 'Tailoring...' : 'Tailor Resume for This Job'}
+              </button>
+            </div>
           )}
           {tailorError && (
               <div className="w-full border border-red-500/40 bg-red-500/5 px-3 py-2">

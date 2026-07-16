@@ -1682,10 +1682,15 @@ async def tailor_resume_endpoint(
     company: str = Form(...),
     job_description: str = Form(default=""),
     job_hash: str = Form(default=""),
+    template_id: str = Form(default="classic"),
     user_id: str = Depends(require_user),
 ):
     from quota import get_tailor_quota_status, record_tailor_request, WEEKLY_TAILOR_LIMIT
     from job_database import get_job_by_hash
+    from resume_tailor.tailor_resume import TEMPLATE_REGISTRY
+
+    if template_id not in TEMPLATE_REGISTRY:
+        raise HTTPException(status_code=400, detail=f"Unknown template_id: {template_id}")
 
     # Check Postgres-backed weekly quota before doing any work
     if TRACK_USAGE:
@@ -1737,7 +1742,7 @@ async def tailor_resume_endpoint(
     start_time = time.time()
 
     try:
-        pdf_bytes = _tailor_resume(file_content, job_title, company, resolved_jd)
+        pdf_bytes = _tailor_resume(file_content, job_title, company, resolved_jd, template_id=template_id)
     except ValueError as e:
         logger.error(f"Tailor error (user={user_id}): {e}")
         raise HTTPException(status_code=400, detail=str(e))
