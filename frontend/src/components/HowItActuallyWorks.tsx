@@ -59,7 +59,7 @@ const steps = [
   {
     n: '— iii —',
     title: 'Read',
-    desc: 'Open the top ten with one-line reasoning. Apply, tailor, or move on.',
+    desc: 'Open the top ten with one-line reasoning on why you\'re a fit, then apply with a résumé that\'s actually ready to land the interview.',
     visual: (
       <div className="mt-5 space-y-1.5">
         {[['Ramp', '94'], ['Linear', '88'], ['Vercel', '81']].map(([co, score]) => (
@@ -88,7 +88,8 @@ export function HowItActuallyWorks({ activeJobs }: { activeJobs: number | null }
       <h2 className="font-serif text-3xl text-text-primary mb-4">How it actually works.</h2>
       <p className="text-sm text-text-secondary leading-relaxed max-w-xl mb-10">
         It reads your resume like a person would, then scores all {jobCount} live postings against
-        your skills. You read the top ten and apply.
+        your skills — so you know which ones are worth your time, and what to fix so more of
+        them call you back.
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
