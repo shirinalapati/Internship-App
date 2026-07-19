@@ -1087,16 +1087,21 @@ def tailor_resume(
 # ---------------------------------------------------------------------------
 
 def compile_resume_json_to_pdf(
-    resume_json: dict, font_anchor: int = 11, spacing: str = "tight"
+    resume_json: dict, font_anchor: int = 11, spacing: str = "tight", template_id: str = "classic"
 ) -> tuple[bytes, dict]:
     """inject_into_template → font lock → _trim_to_single_line backstop →
     spacing stretch. NO Claude calls. Returns (pdf_bytes, diagnostics).
 
     diagnostics.widows lists bullets whose last wrapped line is still short —
     the CALLING AGENT (not this code) rewrites those bullets and recompiles.
+
+    template_id defaults to "classic" so every existing caller (the
+    /api/v1/resume/compile MCP endpoint and the internship-mcp vendored copy,
+    neither of which pass it) keeps producing byte-identical classic output —
+    compile-engine parity rule.
     """
     data = copy.deepcopy(resume_json)
-    latex = inject_into_template(data)
+    latex = inject_into_template(data, template_id)
 
     # ---- Font lock (parameterized anchor; mirrors _lock_font) ----
     font = font_anchor if font_anchor in FONT_SIZES else _ANCHOR_FONT
@@ -1135,14 +1140,14 @@ def compile_resume_json_to_pdf(
                 data[section][j]["bullets"][k] = _trim_to_single_line(
                     data[section][j]["bullets"][k], cap
                 )
-            latex = inject_into_template(data)
+            latex = inject_into_template(data, template_id)
             pdf = _compile_at(latex, font, preset)
     except _PdftotextUnavailable as exc:
         logger.warning("compile core: widow backstop disabled — %s", exc)
 
     # ---- Spacing stretch if underfilled (deterministic) ----
     if preset == "tight" and _count_pdf_pages(pdf) == 1 and _page1_fill_ratio(pdf) < UNDERFILL_RATIO:
-        latex_for_stretch = inject_into_template(data)
+        latex_for_stretch = inject_into_template(data, template_id)
         for try_preset in ("normal", "relaxed"):
             candidate = _compile_at(latex_for_stretch, font, try_preset)
             if _count_pdf_pages(candidate) > 1:

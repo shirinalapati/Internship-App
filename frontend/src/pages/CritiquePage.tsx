@@ -7,6 +7,8 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { DEPARTMENT_CATEGORIES } from '../components/ui/department-multi-select';
 import { API_BASE_URL } from '../lib/api';
+import classicThumb from '../assets/resume-templates/classic-thumb.png';
+import modernThumb from '../assets/resume-templates/modern-thumb.png';
 
 // ---------------------------------------------------------------------------
 // Types — mirror resume_critique.critique_resume.critique_resume_to_json output
@@ -272,6 +274,271 @@ function ResumeDiffPage({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Tailor-résumé fan/notes trigger — replaces the old purple "Generate my
+// improved resume" CTA (GitHub #79: "use this design choice from claude
+// design: E · Ink pill, emerald accent bar"). Floats bottom-right over the
+// resume preview pane. State machine: idle -> fan -> notes -> (generating
+// driven by the real `generating` prop, not a local timer).
+// ---------------------------------------------------------------------------
+
+const TAILOR_ACCENT = 'hsl(142 72% 45%)'; // matches this file's existing "tailored" green accent
+const TAILOR_EASE = 'cubic-bezier(.22,.61,.36,1)';
+
+type TailorTemplateId = 'classic' | 'modern';
+
+const TAILOR_TEMPLATES: { id: TailorTemplateId; label: string; thumb: string }[] = [
+  { id: 'modern', label: 'Modern', thumb: modernThumb },
+  { id: 'classic', label: 'Classic', thumb: classicThumb },
+];
+
+function TailorTrigger({
+  mode,
+  onModeChange,
+  sel,
+  onSelChange,
+  extraContext,
+  onExtraContextChange,
+  generating,
+  rewritableCount,
+  onGenerate,
+}: {
+  mode: 'idle' | 'fan' | 'notes';
+  onModeChange: (m: 'idle' | 'fan' | 'notes') => void;
+  sel: TailorTemplateId;
+  onSelChange: (t: TailorTemplateId) => void;
+  extraContext: string;
+  onExtraContextChange: (v: string) => void;
+  generating: boolean;
+  rewritableCount: number;
+  onGenerate: () => void;
+}) {
+  const fanOpen = mode === 'fan';
+  const panelOpen = mode === 'notes' || generating;
+  const selLabel = sel === 'classic' ? 'Classic' : 'Modern';
+  const selThumb = sel === 'classic' ? classicThumb : modernThumb;
+
+  const fanCardStyle = (dx: number, dy: number, rot: number, delay: string): React.CSSProperties => ({
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 172,
+    background: '#1E293B',
+    border: '1px solid rgba(148,163,184,0.2)',
+    borderRadius: 12,
+    overflow: 'hidden',
+    boxShadow: '0 18px 40px rgba(0,0,0,0.5)',
+    transformOrigin: 'bottom right',
+    opacity: fanOpen ? 1 : 0,
+    transform: fanOpen ? `translate(${dx}px,${dy}px) rotate(${rot}deg)` : 'translate(0,0) scale(0.5)',
+    pointerEvents: fanOpen ? 'auto' : 'none',
+    transition: `opacity .25s ease ${delay}, transform .4s ${TAILOR_EASE} ${delay}`,
+  });
+
+  return (
+    <div
+      onMouseEnter={() => { if (mode === 'idle') onModeChange('fan'); }}
+      onMouseLeave={() => { if (mode === 'fan') onModeChange('idle'); }}
+      style={{ position: 'absolute', right: 28, bottom: 28, zIndex: 5 }}
+    >
+      {/* fan cards */}
+      {TAILOR_TEMPLATES.map((t) => {
+        const isClassic = t.id === 'classic';
+        const style = isClassic ? fanCardStyle(-4, -16, -4, '.02s') : fanCardStyle(-192, -34, 3, '.09s');
+        return (
+          <div key={t.id} style={style}>
+            <img
+              src={t.thumb}
+              alt={`${t.label} template preview`}
+              style={{ display: 'block', width: '100%', height: 116, objectFit: 'cover', objectPosition: 'top center' }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 11px' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#F1F5F9' }}>{t.label}</span>
+              <button
+                type="button"
+                onClick={() => { onSelChange(t.id); onModeChange('notes'); }}
+                style={
+                  isClassic
+                    ? { height: 28, padding: '0 11px', border: 'none', borderRadius: 999, background: '#F1F5F9', color: '#0F172A', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', boxShadow: `inset 3px 0 0 ${TAILOR_ACCENT}` }
+                    : { height: 28, padding: '0 11px', border: '1px solid rgba(148,163,184,0.3)', borderRadius: 999, background: 'transparent', color: '#E2E8F0', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }
+                }
+              >
+                Use →
+              </button>
+            </div>
+          </div>
+        );
+      })}
+
+      {/* resting pill */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onModeChange('fan')}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 9,
+          height: 46,
+          padding: '0 20px',
+          borderRadius: 999,
+          background: '#F1F5F9',
+          color: '#0F172A',
+          fontWeight: 600,
+          fontSize: 14,
+          fontFamily: "'Source Sans 3', sans-serif",
+          boxShadow: `inset 3px 0 0 ${TAILOR_ACCENT}, 0 8px 22px rgba(0,0,0,0.4)`,
+          cursor: 'pointer',
+          opacity: fanOpen || panelOpen ? 0 : 1,
+          transform: fanOpen || panelOpen ? 'scale(0.9)' : 'scale(1)',
+          pointerEvents: fanOpen || panelOpen ? 'none' : 'auto',
+          transition: `opacity .18s ease, transform .25s ${TAILOR_EASE}`,
+        }}
+      >
+        <span>✦</span>
+        <span>Tailor résumé</span>
+      </div>
+
+      {/* notes panel */}
+      <div
+        style={{
+          position: 'absolute',
+          right: 0,
+          bottom: 0,
+          width: 400,
+          background: '#1E293B',
+          border: '1px solid rgba(148,163,184,0.2)',
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.55)',
+          padding: '16px 18px 18px',
+          boxSizing: 'border-box',
+          fontFamily: "'Source Sans 3', sans-serif",
+          transformOrigin: 'bottom right',
+          opacity: panelOpen ? 1 : 0,
+          transform: panelOpen ? 'scale(1)' : 'scale(0.6)',
+          pointerEvents: panelOpen ? 'auto' : 'none',
+          transition: `opacity .22s ease, transform .32s ${TAILOR_EASE}`,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 11,
+            paddingBottom: 14,
+            marginBottom: 14,
+            borderBottom: '1px solid rgba(148,163,184,0.14)',
+          }}
+        >
+          <img
+            src={selThumb}
+            alt={`${selLabel} template`}
+            style={{ width: 40, height: 52, objectFit: 'cover', objectPosition: 'top center', borderRadius: 5, border: `2px solid ${TAILOR_ACCENT}`, flex: 'none' }}
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+            <span style={{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#64748B' }}>
+              Tailoring into
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: '#F1F5F9' }}>{selLabel} style</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => onModeChange('fan')}
+            disabled={generating}
+            style={{ height: 30, padding: '0 12px', border: '1px solid rgba(148,163,184,0.3)', borderRadius: 999, background: 'transparent', color: '#CBD5E1', fontSize: 12, fontWeight: 600, cursor: generating ? 'default' : 'pointer', flex: 'none', opacity: generating ? 0.5 : 1 }}
+          >
+            Change
+          </button>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={() => onModeChange('idle')}
+            disabled={generating}
+            style={{ width: 28, height: 28, border: 'none', borderRadius: 8, background: 'transparent', color: '#64748B', fontSize: 13, cursor: generating ? 'default' : 'pointer', flex: 'none', opacity: generating ? 0.5 : 1 }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {!generating && (
+          <div>
+            <label htmlFor="tailor-extra-context" style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#CBD5E1', marginBottom: 7 }}>
+              Anything we should know before we rewrite? <span style={{ color: '#64748B', fontWeight: 400 }}>(optional)</span>
+            </label>
+            <textarea
+              id="tailor-extra-context"
+              rows={4}
+              value={extraContext}
+              onChange={(e) => onExtraContextChange(e.target.value)}
+              placeholder="e.g. I'm targeting backend / infra internships. Keep the Datadog caching bullet, it's my strongest."
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                background: '#0F172A',
+                border: '1px solid rgba(148,163,184,0.2)',
+                borderRadius: 8,
+                padding: '10px 12px',
+                fontFamily: "'Source Sans 3', sans-serif",
+                fontSize: '12.5px',
+                lineHeight: 1.5,
+                color: '#E2E8F0',
+                resize: 'vertical',
+                outline: 'none',
+                minHeight: 86,
+              }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, marginTop: 12 }}>
+              <span style={{ fontSize: 12, color: '#64748B' }}>
+                {rewritableCount} bullet{rewritableCount === 1 ? '' : 's'} rewritten · rest stays as-is
+              </span>
+              <button
+                type="button"
+                onClick={onGenerate}
+                style={{
+                  flex: 'none',
+                  height: 42,
+                  padding: '0 20px',
+                  border: 'none',
+                  borderRadius: 999,
+                  background: '#F1F5F9',
+                  color: '#0F172A',
+                  fontFamily: "'Source Sans 3', sans-serif",
+                  fontSize: '13.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  boxShadow: `inset 3px 0 0 ${TAILOR_ACCENT}`,
+                }}
+              >
+                Generate — {selLabel}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {generating && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 4px 6px' }}>
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 999,
+                border: '2.5px solid rgba(148,163,184,0.25)',
+                borderTopColor: TAILOR_ACCENT,
+                animation: 'spin4c .7s linear infinite',
+                flex: 'none',
+                display: 'inline-block',
+              }}
+            />
+            <span style={{ fontSize: '13.5px', color: '#CBD5E1' }}>
+              Rewriting {rewritableCount} bullet{rewritableCount === 1 ? '' : 's'} in {selLabel} style…
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const ZOOM_MIN = 0.4;
 const ZOOM_MAX = 1.1;
 const ZOOM_STEP = 0.1;
@@ -509,6 +776,8 @@ const CritiquePage: React.FC = () => {
   const [currentZoom, setCurrentZoom] = useState(0.635);
   const [tailoredZoom, setTailoredZoom] = useState(0.635);
   const [devPasteText, setDevPasteText] = useState('');
+  const [tailorMode, setTailorMode] = useState<'idle' | 'fan' | 'notes'>('idle');
+  const [tailorTemplate, setTailorTemplate] = useState<TailorTemplateId>('classic');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nextDelay = useRiseDelay();
 
@@ -643,6 +912,7 @@ const CritiquePage: React.FC = () => {
           structured_resume: resumeOnly,
           critiques: rewritable,
           extra_context: extraContext,
+          template_id: tailorTemplate,
         }),
       });
       if (!res.ok) {
@@ -856,6 +1126,7 @@ const CritiquePage: React.FC = () => {
     <div className="min-h-screen bg-bg text-text-primary font-sans" style={{ fontFamily: "'Source Sans 3', system-ui, sans-serif" }}>
       <style>{`@keyframes rise { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulseDot { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.55); opacity: 0.4; } }
+        @keyframes spin4c { to { transform: rotate(360deg); } }
         @media (prefers-reduced-motion: reduce) {
           [style*="animation: rise"], [style*="animation:rise"] { animation: none !important; opacity: 1 !important; transform: none !important; }
           [style*="pulseDot"] { animation: none !important; }
@@ -959,38 +1230,10 @@ const CritiquePage: React.FC = () => {
                 Hover a dot to read the note. Unmarked lines are fine as they are.
               </p>
             </div>
-
-            <div
-              className="rounded-[10px] border border-lp-border p-[16px_18px]"
-              style={{ background: 'var(--lp-surface)', animation: 'rise 0.5s ease 0.41s both' }}
-            >
-              <div className="text-[11px] font-bold tracking-[0.09em] uppercase text-text-tertiary mb-2">
-                Turn this feedback into a new resume
-              </div>
-              <p className="mb-3 text-[12.5px] leading-relaxed text-text-secondary">
-                We'll rewrite the flagged lines, keep everything that already works, and give you a fresh PDF to review.
-              </p>
-              <label htmlFor="extra-context" className="block text-xs font-semibold text-text-secondary mb-1.5">
-                Anything we should know? <span className="font-normal text-text-tertiary">(optional)</span>
-              </label>
-              <textarea
-                id="extra-context"
-                rows={3}
-                value={extraContext}
-                onChange={(e) => setExtraContext(e.target.value)}
-                placeholder="e.g. I'm targeting backend roles; the RISE Lab work was mostly data cleaning…"
-                className="w-full box-border bg-card border border-lp-border rounded-lg px-[11px] py-[9px] text-[12.5px] leading-relaxed text-text-primary resize-y outline-none focus:border-text-primary"
-              />
-              <div className="mt-3">
-                <Button className="w-full" onClick={handleGenerate} disabled={generating}>
-                  {generating ? 'Generating…' : 'Generate my improved resume'}
-                </Button>
-              </div>
-            </div>
           </aside>
 
           {/* Resume page */}
-          <main className="w-[720px] flex-none">
+          <main className="w-[720px] flex-none" style={{ position: 'relative' }}>
             <div
               className="box-border"
               style={{
@@ -1130,6 +1373,18 @@ const CritiquePage: React.FC = () => {
                 </>
               )}
             </div>
+
+            <TailorTrigger
+              mode={tailorMode}
+              onModeChange={setTailorMode}
+              sel={tailorTemplate}
+              onSelChange={setTailorTemplate}
+              extraContext={extraContext}
+              onExtraContextChange={setExtraContext}
+              generating={generating}
+              rewritableCount={result.critiques.filter((c) => c.severity !== 'green').length}
+              onGenerate={handleGenerate}
+            />
           </main>
 
           {/* Right rail reserved for hover comments */}
