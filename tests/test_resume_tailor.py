@@ -121,6 +121,69 @@ class TestInjectIntoTemplate:
 
 
 # ---------------------------------------------------------------------------
+# Honors & Awards (Bug #79 content-fidelity fix)
+# ---------------------------------------------------------------------------
+
+class TestInjectIntoTemplateHonors:
+    def test_honors_absent_no_section(self, sample_resume_data):
+        """sample_resume_data has no 'honors' key at all — must not KeyError, and
+        must NOT render an empty 'Honors & Awards' section header. This is the
+        no-regression guarantee for every resume compiled before this field existed."""
+        assert "honors" not in sample_resume_data
+        latex = inject_into_template(sample_resume_data)
+        assert "{{HONORS}}" not in latex
+        assert "Honors" not in latex
+
+    def test_honors_empty_list_no_section(self, sample_resume_data):
+        data = dict(sample_resume_data)
+        data["honors"] = []
+        latex = inject_into_template(data)
+        assert "Honors" not in latex
+
+    def test_honors_rendered_when_present(self, sample_resume_data):
+        data = dict(sample_resume_data)
+        data["honors"] = [
+            "AP Scholar, 2022-2023",
+            "AP Scholar with Honor, 2024",
+            "Level 3, State Honors in Piano, Music Teachers Association of California, 2021-2022",
+        ]
+        latex = inject_into_template(data)
+        assert "Honors \\& Awards" in latex
+        assert "AP Scholar, 2022-2023" in latex
+        assert "AP Scholar with Honor, 2024" in latex
+        assert "Level 3, State Honors in Piano" in latex
+
+    def test_honors_special_chars_escaped(self, sample_resume_data):
+        data = dict(sample_resume_data)
+        data["honors"] = ["Dean's List, 100% attendance (2023)"]
+        latex = inject_into_template(data)
+        assert r"100\% attendance" in latex
+
+    def test_honors_drops_blank_and_non_string_entries(self, sample_resume_data):
+        data = dict(sample_resume_data)
+        data["honors"] = ["Real Honor", "", None, 42, "   "]
+        latex = inject_into_template(data)
+        assert "Real Honor" in latex
+        # Only one honor line should render — no stray entries for the invalid ones.
+        assert latex.count("Real Honor") == 1
+
+    def test_no_honors_key_produces_same_content_as_before(self, sample_resume_data):
+        """Regression: resumes without an 'honors' field must render the exact
+        same visible content as before this feature existed (compile-parity)."""
+        latex = inject_into_template(sample_resume_data)
+        for expected in ("Jane Doe", "jane@example.com", "Acme Corp", "Python", "InternTracker"):
+            assert expected in latex
+        assert "Honors" not in latex
+
+    def test_honors_present_in_modern_template_too(self, sample_resume_data):
+        data = dict(sample_resume_data)
+        data["honors"] = ["AP Scholar, 2022-2023"]
+        latex = inject_into_template(data, "modern")
+        assert "Honors \\& Awards" in latex
+        assert "AP Scholar, 2022-2023" in latex
+
+
+# ---------------------------------------------------------------------------
 # Template selection (template_id) — resume templates feature
 # ---------------------------------------------------------------------------
 
