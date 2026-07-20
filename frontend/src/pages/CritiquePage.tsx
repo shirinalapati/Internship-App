@@ -1,12 +1,21 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth, SignInButton } from '@clerk/react';
 import { Upload, CheckCircle2, Sparkles, Eye, PenLine, Download } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
 import Header from '../components/Header';
 import Logo from '../components/Logo';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { DEPARTMENT_CATEGORIES } from '../components/ui/department-multi-select';
 import { API_BASE_URL } from '../lib/api';
+
+// pdfjs needs its worker script served as a real URL — webpack 5 (react-scripts 5)
+// resolves this `new URL(..., import.meta.url)` pattern into a bundled asset at build
+// time, so the worker ships with our own build instead of depending on a CDN at runtime.
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url
+).toString();
 
 // ---------------------------------------------------------------------------
 // Types — mirror resume_critique.critique_resume.critique_resume_to_json output
@@ -39,6 +48,15 @@ interface CritiqueFlag {
   severity: 'red' | 'yellow' | 'green';
   comment: string;
 }
+// Mirrors resume_tailor.tailor_resume.get_bullet_page_positions's return shape —
+// top_frac/left_frac are fractions (0.0-1.0) of the compiled PDF page's height/width,
+// with top_frac increasing DOWN the page (0.0 = top edge). See that function's
+// docstring for the full coordinate-convention writeup.
+interface BulletPosition {
+  bullet_id: string;
+  top_frac: number;
+  left_frac: number;
+}
 interface CritiqueResult {
   name: string;
   email?: string;
@@ -53,6 +71,12 @@ interface CritiqueResult {
   detected_category: string;
   critiques: CritiqueFlag[];
   cached: boolean;
+  // Real compiled PDF of the as-critiqued resume + per-bullet coordinates on it, so the
+  // review pane can render the actual pdflatex output with dots overlaid instead of an
+  // HTML mockup (issue #79). Optional because older cached critique entries (compiled
+  // before this field existed) or a server-side compile failure won't have it.
+  pdf_base64?: string;
+  bullet_positions?: BulletPosition[];
 }
 
 const SEVERITY: Record<
@@ -320,36 +344,79 @@ function ZoomControl({ zoom, onChange }: { zoom: number; onChange: (z: number) =
 // Staggered "rise" reveal — sequential animation-delay down the page.
 // ---------------------------------------------------------------------------
 
-function useRiseDelay(step = 0.08, start = 0.1) {
-  const counter = useRef(start);
-  counter.current = start;
-  return () => {
-    const d = counter.current;
-    counter.current += step;
-    return d;
-  };
-}
+// ---------------------------------------------------------------------------
+// Real-PDF critique review pane — renders the actual pdflatex-compiled resume
+// to a <canvas> via pdfjs-dist and overlays severity dots at the backend's
+// per-bullet fractional coordinates (see get_bullet_page_positions). This
+// replaces the old hand-built HTML mockup so line-wrapping, margins, and dot
+// positions always match the real compiled page (addresses issue #79).
+// ---------------------------------------------------------------------------
 
-function CommentBox({
-  bulletId,
-  hovered,
+// Matches the mock's old PAGE_WIDTH so the page reads at the same on-screen size
+// users are already used to; the real page's aspect ratio (612x792pt, US Letter)
+// is preserved by pdfjs's own viewport math, not hardcoded here.
+const PDF_PAGE_WIDTH = 720;
+
+// How far LEFT of a bullet's text-start x-coordinate to place its severity dot —
+// mirrors the old mock's dot offset (it sat in the ~42px left margin outside the
+// bullet's own padding). Compiled resumes use a 0.5in (36pt) page margin, which at
+// PDF_PAGE_WIDTH's scale renders as roughly 40-45px, so this comfortably keeps the
+// dot inside the page rather than clipping off its left edge.
+const DOT_LEFT_OFFSET_PX = 32;
+
+function BulletPositionMarker({
+  position,
   flag,
+  hovered,
+  onHover,
 }: {
-  bulletId: string;
-  hovered: string | null;
+  position: BulletPosition;
   flag?: CritiqueFlag;
+  hovered: string | null;
+  onHover: (id: string | null) => void;
 }) {
   if (!flag) return null;
-  const on = hovered === bulletId;
+  const on = hovered === position.bullet_id;
   const sev = SEVERITY[flag.severity];
+  const topPct = position.top_frac * 100;
+  const leftPct = position.left_frac * 100;
+
   return (
     <>
+      <span
+        onMouseEnter={() => onHover(position.bullet_id)}
+        onMouseLeave={() => onHover(null)}
+        style={{
+          position: 'absolute',
+          left: `calc(${leftPct}% - ${DOT_LEFT_OFFSET_PX}px)`,
+          top: `calc(${topPct}% - 2px)`,
+          width: 24,
+          height: 22,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          transition: 'transform 0.15s ease',
+          transform: on ? 'scale(1.25)' : 'scale(1)',
+          zIndex: 20,
+        }}
+      >
+        <span
+          style={{
+            width: 9,
+            height: 9,
+            borderRadius: '50%',
+            background: sev.dot,
+            boxShadow: `0 0 0 3px ${sev.ring}`,
+          }}
+        />
+      </span>
       <span
         aria-hidden="true"
         style={{
           position: 'absolute',
           left: 'calc(100% + 8px)',
-          top: 10,
+          top: `calc(${topPct}% + 8px)`,
           width: 84,
           height: 1,
           background: sev.dot,
@@ -363,7 +430,7 @@ function CommentBox({
         style={{
           position: 'absolute',
           left: 'calc(100% + 100px)',
-          top: -10,
+          top: `calc(${topPct}% - 12px)`,
           width: 264,
           boxSizing: 'border-box',
           background: '#FFFFFF',
@@ -400,66 +467,137 @@ function CommentBox({
   );
 }
 
-function CritiqueBulletLi({
-  bullet,
-  flag,
+function CritiqueResumePdfPage({
+  pdfBase64,
+  bulletPositions,
+  flagByBulletId,
   hovered,
   onHover,
-  delay,
 }: {
-  bullet: CritiqueBullet;
-  flag?: CritiqueFlag;
+  pdfBase64?: string;
+  bulletPositions: BulletPosition[];
+  flagByBulletId: Record<string, CritiqueFlag>;
   hovered: string | null;
   onHover: (id: string | null) => void;
-  delay: number;
 }) {
-  const sev = flag ? SEVERITY[flag.severity] : null;
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [renderSize, setRenderSize] = useState<{ width: number; height: number } | null>(null);
+  const [renderError, setRenderError] = useState('');
+
+  useEffect(() => {
+    if (!pdfBase64) return;
+    let cancelled = false;
+    let task: ReturnType<typeof pdfjsLib.getDocument> | null = null;
+
+    (async () => {
+      try {
+        const byteChars = atob(pdfBase64);
+        const bytes = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+
+        task = pdfjsLib.getDocument({ data: bytes });
+        const pdf = await task.promise;
+        const page = await pdf.getPage(1);
+        if (cancelled) return;
+
+        const baseViewport = page.getViewport({ scale: 1 });
+        const cssScale = PDF_PAGE_WIDTH / baseViewport.width;
+        const dpr = window.devicePixelRatio || 1;
+        const renderViewport = page.getViewport({ scale: cssScale * dpr });
+
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (!canvas || !ctx) return;
+
+        canvas.width = renderViewport.width;
+        canvas.height = renderViewport.height;
+        canvas.style.width = `${cssScale * baseViewport.width}px`;
+        canvas.style.height = `${cssScale * baseViewport.height}px`;
+
+        await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+        if (cancelled) return;
+        setRenderSize({ width: cssScale * baseViewport.width, height: cssScale * baseViewport.height });
+      } catch (e: any) {
+        if (!cancelled) setRenderError(e?.message || 'Failed to render the resume preview.');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfBase64]);
+
+  const fallbackHeight = Math.round(PDF_PAGE_WIDTH * (11 / 8.5));
+
+  if (!pdfBase64) {
+    return (
+      <div
+        style={{
+          width: PDF_PAGE_WIDTH,
+          height: fallbackHeight,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          padding: 32,
+          background: '#FDFCFA',
+          border: '1px solid rgba(31,27,22,0.08)',
+          borderRadius: 2,
+          boxShadow: '0 1px 2px rgba(31,27,22,0.08), 0 16px 48px rgba(31,27,22,0.14)',
+          color: '#5A5247',
+          fontSize: 13,
+          boxSizing: 'border-box',
+        }}
+      >
+        We couldn't generate a preview of your resume just now. Your feedback below is still accurate — try
+        re-uploading if you'd like to see the annotated page.
+      </div>
+    );
+  }
+
   return (
-    <li
+    <div
       style={{
         position: 'relative',
-        paddingLeft: 16,
-        fontSize: '13.5px',
-        lineHeight: 1.5,
-        animation: `rise 0.5s ease ${delay}s both`,
+        width: renderSize?.width ?? PDF_PAGE_WIDTH,
+        height: renderSize?.height ?? fallbackHeight,
+        background: '#FDFCFA',
+        border: '1px solid rgba(31,27,22,0.08)',
+        borderRadius: 2,
+        boxShadow: '0 1px 2px rgba(31,27,22,0.08), 0 16px 48px rgba(31,27,22,0.14)',
+        boxSizing: 'border-box',
+        animation: 'rise 0.5s ease 0.1s both',
       }}
     >
-      <span style={{ position: 'absolute', left: 2, color: '#666' }}>•</span>
-      {bullet.text}
-      {sev && (
-        <>
-          <span
-            data-id={bullet.id}
-            onMouseEnter={() => onHover(bullet.id)}
-            onMouseLeave={() => onHover(null)}
-            style={{
-              position: 'absolute',
-              left: -42,
-              top: 0,
-              width: 24,
-              height: 22,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'transform 0.15s ease',
-              transform: hovered === bullet.id ? 'scale(1.25)' : 'scale(1)',
-            }}
-          >
-            <span
-              style={{
-                width: 9,
-                height: 9,
-                borderRadius: '50%',
-                background: sev.dot,
-                boxShadow: `0 0 0 3px ${sev.ring}`,
-              }}
-            />
-          </span>
-          <CommentBox bulletId={bullet.id} hovered={hovered} flag={flag} />
-        </>
+      <canvas ref={canvasRef} style={{ display: 'block', borderRadius: 2 }} />
+      {renderError && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 32,
+            textAlign: 'center',
+            fontSize: 13,
+            color: '#a33',
+          }}
+        >
+          {renderError}
+        </div>
       )}
-    </li>
+      {renderSize &&
+        bulletPositions.map((pos) => (
+          <BulletPositionMarker
+            key={pos.bullet_id}
+            position={pos}
+            flag={flagByBulletId[pos.bullet_id]}
+            hovered={hovered}
+            onHover={onHover}
+          />
+        ))}
+    </div>
   );
 }
 
@@ -510,7 +648,6 @@ const CritiquePage: React.FC = () => {
   const [tailoredZoom, setTailoredZoom] = useState(0.635);
   const [devPasteText, setDevPasteText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const nextDelay = useRiseDelay();
 
   React.useEffect(() => {
     if (!result) {
@@ -989,147 +1126,17 @@ const CritiquePage: React.FC = () => {
             </div>
           </aside>
 
-          {/* Resume page */}
+          {/* Resume page — the ACTUAL compiled PDF (real pdflatex output, not a mockup),
+              rendered to canvas via pdfjs-dist with severity dots overlaid at the
+              backend's real per-bullet coordinates. See CritiqueResumePdfPage above. */}
           <main className="w-[720px] flex-none">
-            <div
-              className="box-border"
-              style={{
-                background: '#FDFCFA',
-                border: '1px solid rgba(31,27,22,0.08)',
-                borderRadius: 2,
-                boxShadow: '0 1px 2px rgba(31,27,22,0.08), 0 16px 48px rgba(31,27,22,0.14)',
-                padding: '56px 64px 64px',
-                minHeight: 920,
-                fontFamily: "'Source Serif 4', Georgia, serif",
-                color: '#1a1a1a',
-              }}
-            >
-              {/* Resume header */}
-              <div style={{ textAlign: 'center', animation: `rise 0.5s ease ${nextDelay()}s both` }}>
-                <div style={{ fontSize: 26, fontWeight: 700, letterSpacing: '0.01em' }}>{result.name}</div>
-                <div style={{ fontSize: '12.5px', color: '#444', marginTop: 6 }}>{contactLine(result)}</div>
-              </div>
-
-              {result.education.length > 0 && (
-                <>
-                  <div
-                    style={{
-                      fontSize: 12, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
-                      borderBottom: '1px solid #1a1a1a', paddingBottom: 4, margin: '30px 0 12px',
-                      animation: `rise 0.5s ease ${nextDelay()}s both`,
-                    }}
-                  >
-                    Education
-                  </div>
-                  {result.education.map((ed, i) => (
-                    <div key={i} style={{ animation: `rise 0.5s ease ${nextDelay()}s both`, marginBottom: 8 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                        <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{ed.school}</div>
-                        <div style={{ fontSize: '12.5px', fontStyle: 'italic', color: '#444' }}>{ed.dates}</div>
-                      </div>
-                      <div style={{ fontSize: 13, marginTop: 2 }}>{ed.degree}</div>
-                    </div>
-                  ))}
-                </>
-              )}
-
-              {result.experience.length > 0 && (
-                <>
-                  <div
-                    style={{
-                      fontSize: 12, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
-                      borderBottom: '1px solid #1a1a1a', paddingBottom: 4, margin: '28px 0 12px',
-                      animation: `rise 0.5s ease ${nextDelay()}s both`,
-                    }}
-                  >
-                    Experience
-                  </div>
-                  {result.experience.map((exp, i) => (
-                    <div key={i} style={{ marginTop: i === 0 ? 0 : 18 }}>
-                      <div style={{ animation: `rise 0.5s ease ${nextDelay()}s both` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{exp.title} — {exp.company}</div>
-                          <div style={{ fontSize: '12.5px', fontStyle: 'italic', color: '#444' }}>{exp.dates}</div>
-                        </div>
-                        {exp.location && (
-                          <div style={{ fontSize: '12.5px', fontStyle: 'italic', color: '#444', marginTop: 1 }}>{exp.location}</div>
-                        )}
-                      </div>
-                      <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                        {exp.bullets.map((b) => (
-                          <CritiqueBulletLi
-                            key={b.id}
-                            bullet={b}
-                            flag={flagByBulletId[b.id]}
-                            hovered={hovered}
-                            onHover={setHovered}
-                            delay={nextDelay()}
-                          />
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </>
-              )}
-
-              {result.projects.length > 0 && (
-                <>
-                  <div
-                    style={{
-                      fontSize: 12, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
-                      borderBottom: '1px solid #1a1a1a', paddingBottom: 4, margin: '28px 0 12px',
-                      animation: `rise 0.5s ease ${nextDelay()}s both`,
-                    }}
-                  >
-                    Projects
-                  </div>
-                  {result.projects.map((proj, i) => (
-                    <div key={i} style={{ marginTop: i === 0 ? 0 : 18 }}>
-                      <div style={{ animation: `rise 0.5s ease ${nextDelay()}s both` }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <div style={{ fontSize: '13.5px', fontWeight: 700 }}>{proj.name}</div>
-                          <div style={{ fontSize: '12.5px', fontStyle: 'italic', color: '#444' }}>{proj.dates}</div>
-                        </div>
-                      </div>
-                      <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 7 }}>
-                        {proj.bullets.map((b) => (
-                          <CritiqueBulletLi
-                            key={b.id}
-                            bullet={b}
-                            flag={flagByBulletId[b.id]}
-                            hovered={hovered}
-                            onHover={setHovered}
-                            delay={nextDelay()}
-                          />
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </>
-              )}
-
-              {Object.keys(result.skills).length > 0 && (
-                <>
-                  <div
-                    style={{
-                      fontSize: 12, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
-                      borderBottom: '1px solid #1a1a1a', paddingBottom: 4, margin: '28px 0 12px',
-                      animation: `rise 0.5s ease ${nextDelay()}s both`,
-                    }}
-                  >
-                    Skills
-                  </div>
-                  <div style={{ fontSize: '13.5px', lineHeight: 1.6, animation: `rise 0.5s ease ${nextDelay()}s both` }}>
-                    {Object.entries(result.skills).map(([label, value], i, arr) => (
-                      <React.Fragment key={label}>
-                        <span style={{ fontWeight: 700 }}>{label}:</span> {value}
-                        {i < arr.length - 1 && <>{'  ·  '}</>}
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
+            <CritiqueResumePdfPage
+              pdfBase64={result.pdf_base64}
+              bulletPositions={result.bullet_positions ?? []}
+              flagByBulletId={flagByBulletId}
+              hovered={hovered}
+              onHover={setHovered}
+            />
           </main>
 
           {/* Right rail reserved for hover comments */}
