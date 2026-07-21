@@ -1787,6 +1787,32 @@ async def tailor_resume_endpoint(
     )
 
 
+def _compile_critique_preview_pdf(critique_result: dict) -> tuple:
+    """Compile the AS-CRITIQUED resume (bullets exactly as parsed, no rewriting) to a
+    real pdflatex-rendered PDF and extract per-bullet page positions, so the frontend
+    can render the actual compiled page instead of an HTML mockup (see issue #79).
+    Computed once, alongside the critique/rewrite call, so the client never needs an
+    extra round-trip just to get a PDF.
+
+    Returns (pdf_base64, bullet_positions). On any compile failure (e.g. pdflatex
+    unavailable in this environment), returns (None, []) so the critique JSON itself
+    still ships — a missing preview PDF degrades the frontend rendering, it must never
+    fail the whole critique request.
+    """
+    import base64
+
+    from resume_critique.critique_resume import to_compile_schema
+    from resume_tailor.tailor_resume import compile_resume_json_to_pdf, get_bullet_page_positions
+
+    try:
+        pdf_bytes, _diagnostics = compile_resume_json_to_pdf(to_compile_schema(critique_result))
+        positions = get_bullet_page_positions(pdf_bytes, critique_result)
+        return base64.b64encode(pdf_bytes).decode(), positions
+    except Exception as e:
+        logger.warning(f"Critique preview PDF compile failed: {e}")
+        return None, []
+
+
 @app.post("/api/critique-resume")
 @limiter.limit("5/minute")
 async def critique_resume_endpoint(
@@ -1853,6 +1879,7 @@ async def critique_resume_endpoint(
         logger.error(f"Critique error (user={user_id}): unexpected — {e}")
         raise HTTPException(status_code=500, detail=f"Resume critique failed: {e}")
 
+    result["pdf_base64"], result["bullet_positions"] = _compile_critique_preview_pdf(result)
     set_critique_cache(user_id, resume_hash, category or "auto", result)
 
     if TRACK_USAGE:
@@ -1902,6 +1929,7 @@ async def critique_resume_text_dev_endpoint(request: Request, user_id: str = Dep
         logger.error(f"Dev critique-by-text error (user={user_id}): unexpected — {e}")
         raise HTTPException(status_code=500, detail=f"Resume critique failed: {e}")
 
+    result["pdf_base64"], result["bullet_positions"] = _compile_critique_preview_pdf(result)
     return JSONResponse({**result, "cached": False})
 
 
@@ -1917,7 +1945,7 @@ async def critique_rewrite_endpoint(request: Request, user_id: str = Depends(req
 
     from quota import get_tailor_quota_status, record_tailor_request, WEEKLY_TAILOR_LIMIT
     from resume_critique.critique_resume import apply_critique_rewrite, to_compile_schema
-    from resume_tailor.tailor_resume import compile_resume_json_to_pdf, TEMPLATE_REGISTRY
+    from resume_tailor.tailor_resume import compile_resume_json_to_pdf, get_bullet_page_positions, TEMPLATE_REGISTRY
 
     try:
         body = await request.json()
@@ -1961,6 +1989,11 @@ async def critique_rewrite_endpoint(request: Request, user_id: str = Depends(req
     try:
         rewritten = apply_critique_rewrite(structured_resume, critiques, extra_context)
         pdf_bytes, _diagnostics = compile_resume_json_to_pdf(to_compile_schema(rewritten), template_id=template_id)
+        try:
+            bullet_positions = get_bullet_page_positions(pdf_bytes, rewritten)
+        except Exception as e:
+            logger.warning(f"Tailored PDF bullet-position extraction failed (user={user_id}): {e}")
+            bullet_positions = []
     except RuntimeError as e:
         logger.error(f"Critique rewrite error (user={user_id}): {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1985,6 +2018,7 @@ async def critique_rewrite_endpoint(request: Request, user_id: str = Depends(req
         "structured_resume": rewritten,
         "pdf_base64": base64.b64encode(pdf_bytes).decode(),
         "rewritten_bullet_ids": [c["bullet_id"] for c in critiques if c.get("bullet_id")],
+        "bullet_positions": bullet_positions,
     })
 
 

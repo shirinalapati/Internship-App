@@ -1110,6 +1110,111 @@ def tailor_resume(
 # (compile-engine parity rule).
 # ---------------------------------------------------------------------------
 
+def get_bullet_page_positions(pdf_bytes: bytes, structured_resume: dict) -> list[dict]:
+    """Map each bullet in `structured_resume` to its on-page position in a compiled PDF.
+
+    `structured_resume` must be in the CRITIQUE schema — entries whose `bullets` list
+    holds `{"id": ..., "text": ...}` dicts (see resume_critique.critique_resume) — so
+    each returned position can be keyed by the same bullet_id the frontend already uses
+    to look up severity flags. `pdf_bytes` must be the PDF compiled from this exact
+    resume via the classic template (TEMPLATE_REGISTRY["classic"] / inject_into_template's
+    default) — this function only works against the classic template for now, because it
+    scans page 1 for `_BULLET_GLYPH`, the itemize bullet character `inject_into_template`
+    renders for that template.
+
+    COORDINATE CONVENTION (read this before touching the math below):
+    `top_frac` and `left_frac` are each a FRACTION of the page's full height/width
+    (0.0-1.0), not absolute PDF points, so callers can multiply by whatever the PDF is
+    actually rendered at (any zoom/DPI) instead of hardcoding a page size.
+      - `top_frac` = (distance from the TOP edge of the page down to the top of the
+        bullet's first rendered line) / page_height. It is 0.0 at the very top of the
+        page and INCREASES going DOWN the page toward 1.0 at the bottom — this matches
+        both pdfplumber's own `top` coordinate (which also increases downward) and a
+        plain CSS `top: X%` on an element absolutely positioned inside a container
+        anchored to the top of the rendered page canvas. A bullet further down the
+        resume always has a strictly larger `top_frac` than one above it.
+      - `left_frac` = (distance from the LEFT edge of the page to where the bullet's
+        TEXT begins, i.e. just after the bullet glyph and its following whitespace) /
+        page_width.
+
+    Matching strategy: bullets are matched to rendered lines BY POSITION, in the same
+    render order `_flatten_bullet_locations` already defines (experience bullets top to
+    bottom, then projects) — this is the same order `measure_bullets` relies on for
+    widow detection, so it's already proven to line up with how `inject_into_template`
+    emits `\\item`s. If pdfplumber finds a different number of bullet-glyph lines on
+    page 1 than the resume has bullets (e.g. content spilled onto a second page, or a
+    non-classic template was actually used), this returns as many best-effort matches
+    as it can and logs a warning rather than raising — callers should treat a short
+    list as "some bullets are unpositioned," not as an error.
+    """
+    locations = _flatten_bullet_locations(structured_resume)
+    bullet_ids: list = []
+    for section, j, k in locations:
+        entry = structured_resume.get(section, [])[j]
+        bullet = entry.get("bullets", [])[k]
+        bullet_ids.append(bullet.get("id") if isinstance(bullet, dict) else None)
+
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        page = pdf.pages[0]
+        chars = page.chars
+        page_height = page.height
+        page_width = page.width
+
+    if not chars:
+        return []
+
+    # Group chars into physical lines: chars on the same rendered line share (nearly)
+    # identical `top`. Round to absorb sub-point rendering noise, then merge buckets
+    # that ended up within 1pt of each other (rounding can split one visual line into
+    # two adjacent buckets right at a rounding boundary).
+    raw_lines: dict = {}
+    for c in chars:
+        key = round(c["top"], 1)
+        raw_lines.setdefault(key, []).append(c)
+
+    merged_lines: list = []  # list of [top, [chars]]
+    for t in sorted(raw_lines.keys()):
+        if merged_lines and abs(t - merged_lines[-1][0]) <= 1.0:
+            merged_lines[-1][1].extend(raw_lines[t])
+        else:
+            merged_lines.append([t, list(raw_lines[t])])
+
+    bullet_lines: list = []  # (top, left) for each physical line starting with the glyph
+    for top, line_chars in merged_lines:
+        line_chars.sort(key=lambda c: c["x0"])
+        stripped = [c for c in line_chars if c["text"].strip()]
+        if not stripped or stripped[0]["text"] != _BULLET_GLYPH:
+            continue
+        glyph_idx = line_chars.index(stripped[0])
+        after_glyph = [c for c in line_chars[glyph_idx + 1:] if c["text"].strip()]
+        left_x = after_glyph[0]["x0"] if after_glyph else stripped[0]["x0"]
+        first_top = min(c["top"] for c in line_chars)
+        bullet_lines.append((first_top, left_x))
+
+    bullet_lines.sort(key=lambda pair: pair[0])
+
+    n = min(len(bullet_lines), len(bullet_ids))
+    if len(bullet_lines) != len(bullet_ids):
+        logger.warning(
+            "get_bullet_page_positions: found %d bullet-glyph line(s) on page 1 but the "
+            "resume has %d bullet(s) — returning %d best-effort position(s)",
+            len(bullet_lines), len(bullet_ids), n,
+        )
+
+    positions = []
+    for i in range(n):
+        bullet_id = bullet_ids[i]
+        if bullet_id is None:
+            continue
+        top, left = bullet_lines[i]
+        positions.append({
+            "bullet_id": bullet_id,
+            "top_frac": round(top / page_height, 4),
+            "left_frac": round(left / page_width, 4),
+        })
+    return positions
+
+
 def compile_resume_json_to_pdf(
     resume_json: dict, font_anchor: int = 11, spacing: str = "tight", template_id: str = "classic"
 ) -> tuple[bytes, dict]:

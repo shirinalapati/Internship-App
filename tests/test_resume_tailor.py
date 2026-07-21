@@ -8,6 +8,7 @@ External deps mocked:
 """
 import io
 import json
+import shutil
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,6 +22,10 @@ from resume_tailor.tailor_resume import (
     compile_resume_json_to_pdf,
     compile_to_single_page,
     inject_into_template,
+)
+
+needs_pdflatex = pytest.mark.skipif(
+    shutil.which("pdflatex") is None, reason="pdflatex not installed"
 )
 
 
@@ -434,3 +439,110 @@ class TestTailorResumeToJson:
             result = tailor_resume_to_json("text", "SWE", "Acme", "desc")
 
         assert result["name"] == "Alice"
+
+
+# ---------------------------------------------------------------------------
+# get_bullet_page_positions — real pdflatex compile + pdfplumber coordinate
+# extraction (critique feature's real-PDF-render overlay, issue #79)
+# ---------------------------------------------------------------------------
+
+def _to_critique_schema(sample: dict) -> dict:
+    """Convert a plain-bullet resume dict (sample_resume_data shape) into the
+    CRITIQUE schema — bullets become {"id": ..., "text": ...} dicts, ids assigned
+    sequentially in render order (experience bullets first, then projects), matching
+    how resume_critique.critique_resume.critique_resume_to_json assigns ids."""
+    import copy
+    data = copy.deepcopy(sample)
+    counter = 1
+    for section in ("experience", "projects"):
+        for entry in data.get(section, []):
+            new_bullets = []
+            for text in entry.get("bullets", []):
+                new_bullets.append({"id": f"b{counter}", "text": text})
+                counter += 1
+            entry["bullets"] = new_bullets
+    return data
+
+
+def _to_plain_schema(critique_schema: dict) -> dict:
+    """Inverse of _to_critique_schema — strips bullet ids back to plain strings so
+    the result can be fed to inject_into_template / compile_resume_json_to_pdf."""
+    import copy
+    data = copy.deepcopy(critique_schema)
+    for section in ("experience", "projects"):
+        for entry in data.get(section, []):
+            entry["bullets"] = [b["text"] for b in entry.get("bullets", [])]
+    return data
+
+
+@needs_pdflatex
+class TestGetBulletPagePositions:
+    def test_returns_one_entry_per_bullet(self, sample_resume_data):
+        from resume_tailor.tailor_resume import compile_resume_json_to_pdf, get_bullet_page_positions
+
+        critique_schema = _to_critique_schema(sample_resume_data)
+        pdf_bytes, _diag = compile_resume_json_to_pdf(_to_plain_schema(critique_schema))
+
+        positions = get_bullet_page_positions(pdf_bytes, critique_schema)
+
+        total_bullets = (
+            sum(len(e["bullets"]) for e in critique_schema["experience"])
+            + sum(len(e["bullets"]) for e in critique_schema["projects"])
+        )
+        assert len(positions) == total_bullets
+        assert {p["bullet_id"] for p in positions} == {f"b{i}" for i in range(1, total_bullets + 1)}
+
+    def test_positions_are_within_unit_range(self, sample_resume_data):
+        from resume_tailor.tailor_resume import compile_resume_json_to_pdf, get_bullet_page_positions
+
+        critique_schema = _to_critique_schema(sample_resume_data)
+        pdf_bytes, _diag = compile_resume_json_to_pdf(_to_plain_schema(critique_schema))
+
+        positions = get_bullet_page_positions(pdf_bytes, critique_schema)
+        assert positions, "expected at least one matched bullet position"
+        for p in positions:
+            assert 0.0 <= p["top_frac"] <= 1.0
+            assert 0.0 <= p["left_frac"] <= 1.0
+
+    def test_top_frac_increases_going_down_the_page(self, sample_resume_data):
+        """Bullets later in render order (further down the resume) must have a
+        STRICTLY LARGER top_frac than ones above them.
+
+        This locks in the sign convention documented on get_bullet_page_positions:
+        top_frac is 0.0 at the very TOP of the page and INCREASES going DOWN toward
+        1.0 at the bottom (matching pdfplumber's own `top` coordinate and a plain
+        CSS `top: X%` on a container anchored to the top of the page). If this test
+        starts failing after a refactor, the convention was inverted — fix the
+        docstring and the math together, do not just flip this assertion.
+        """
+        from resume_tailor.tailor_resume import compile_resume_json_to_pdf, get_bullet_page_positions
+
+        critique_schema = _to_critique_schema(sample_resume_data)
+        pdf_bytes, _diag = compile_resume_json_to_pdf(_to_plain_schema(critique_schema))
+
+        positions = get_bullet_page_positions(pdf_bytes, critique_schema)
+        # positions come back in render order (b1, b2, b3, ...) per the function's
+        # own contract, so a plain positional read-off is the render-order sequence.
+        top_fracs = [p["top_frac"] for p in positions]
+        assert top_fracs == sorted(top_fracs)
+        assert top_fracs[0] < top_fracs[-1], "expected a non-degenerate top-to-bottom spread"
+
+    def test_mismatched_bullet_count_returns_best_effort(self, sample_resume_data, caplog):
+        """If the resume claims more bullets than pdfplumber finds bullet-glyph lines
+        (e.g. caller passes the wrong PDF), the function degrades gracefully — it
+        returns as many matches as it can instead of raising."""
+        from resume_tailor.tailor_resume import compile_resume_json_to_pdf, get_bullet_page_positions
+
+        critique_schema = _to_critique_schema(sample_resume_data)
+        pdf_bytes, _diag = compile_resume_json_to_pdf(_to_plain_schema(critique_schema))
+
+        # Add a phantom bullet with no matching rendered line.
+        critique_schema["projects"][0]["bullets"].append({"id": "b_phantom", "text": "not really on the page"})
+
+        positions = get_bullet_page_positions(pdf_bytes, critique_schema)
+        real_bullet_count = sum(
+            len(e["bullets"]) for e in critique_schema["experience"]
+        ) + sum(len(e["bullets"]) for e in critique_schema["projects"])
+
+        assert len(positions) == real_bullet_count - 1
+        assert "b_phantom" not in {p["bullet_id"] for p in positions}
