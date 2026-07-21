@@ -109,11 +109,39 @@ class CrawlOrchestrator:
             logger.warning("No crawler for ats_type=%s", company.ats_type)
             return []
 
+        # get_due_for_crawl() only returns `limit` (default 200) companies per
+        # incremental call, ordered oldest-last_crawled-first. With ~9,953
+        # registered companies that means each company is only actually
+        # visited roughly once every ~12.7h (9953 / 200 * 15min), even though
+        # incremental runs every 15 minutes. A fixed since_hours=1 window
+        # (the GitHub Actions default) silently misses any job that was
+        # posted more than an hour before its turn came up — it's neither
+        # "new" (already >1h old by the time we check) nor caught by the
+        # NEXT incremental run (which won't revisit this company for another
+        # ~12.7h either). Those jobs only ever surface via the once-nightly
+        # full crawl, which defeats the point of running incremental every
+        # 15 minutes.
+        #
+        # Fix: widen the window per-company to cover back to (at least) when
+        # this company was last actually crawled, with a small buffer for
+        # scheduling jitter. Never crawled before -> no time filter at all,
+        # so a newly-discovered company gets its full current listing on its
+        # first pass instead of an arbitrary 1h slice of it.
+        effective_since_hours = since_hours
+        if since_hours is not None:
+            if company.last_crawled is not None:
+                elapsed_hours = (
+                    datetime.utcnow() - company.last_crawled
+                ).total_seconds() / 3600
+                effective_since_hours = max(since_hours, elapsed_hours + 0.25)
+            else:
+                effective_since_hours = None
+
         for attempt in range(MAX_RETRIES):
             rate_limited = False
             async with semaphore:
                 try:
-                    raw_jobs = await module.fetch_jobs(company, since_hours=since_hours)
+                    raw_jobs = await module.fetch_jobs(company, since_hours=effective_since_hours)
                     intern_jobs = [j for j in raw_jobs if is_intern_posting(j.get("_title", ""), j.get("_employment_type", ""))]
                     return [normalize_job(j, company.ats_type, company) for j in intern_jobs]
                 except CompanyNotFound:

@@ -19,6 +19,7 @@ from resume_tailor.tailor_resume import (
     _count_pdf_pages,
     _escape_latex,
     _href,
+    compile_resume_json_to_pdf,
     compile_to_single_page,
     inject_into_template,
 )
@@ -123,6 +124,69 @@ class TestInjectIntoTemplate:
         latex = inject_into_template(data)
         # Should not raise; projects section just becomes empty string
         assert "{{PROJECTS}}" not in latex
+
+
+# ---------------------------------------------------------------------------
+# Honors & Awards (Bug #79 content-fidelity fix)
+# ---------------------------------------------------------------------------
+
+class TestInjectIntoTemplateHonors:
+    def test_honors_absent_no_section(self, sample_resume_data):
+        """sample_resume_data has no 'honors' key at all — must not KeyError, and
+        must NOT render an empty 'Honors & Awards' section header. This is the
+        no-regression guarantee for every resume compiled before this field existed."""
+        assert "honors" not in sample_resume_data
+        latex = inject_into_template(sample_resume_data)
+        assert "{{HONORS}}" not in latex
+        assert "Honors" not in latex
+
+    def test_honors_empty_list_no_section(self, sample_resume_data):
+        data = dict(sample_resume_data)
+        data["honors"] = []
+        latex = inject_into_template(data)
+        assert "Honors" not in latex
+
+    def test_honors_rendered_when_present(self, sample_resume_data):
+        data = dict(sample_resume_data)
+        data["honors"] = [
+            "AP Scholar, 2022-2023",
+            "AP Scholar with Honor, 2024",
+            "Level 3, State Honors in Piano, Music Teachers Association of California, 2021-2022",
+        ]
+        latex = inject_into_template(data)
+        assert "Honors \\& Awards" in latex
+        assert "AP Scholar, 2022-2023" in latex
+        assert "AP Scholar with Honor, 2024" in latex
+        assert "Level 3, State Honors in Piano" in latex
+
+    def test_honors_special_chars_escaped(self, sample_resume_data):
+        data = dict(sample_resume_data)
+        data["honors"] = ["Dean's List, 100% attendance (2023)"]
+        latex = inject_into_template(data)
+        assert r"100\% attendance" in latex
+
+    def test_honors_drops_blank_and_non_string_entries(self, sample_resume_data):
+        data = dict(sample_resume_data)
+        data["honors"] = ["Real Honor", "", None, 42, "   "]
+        latex = inject_into_template(data)
+        assert "Real Honor" in latex
+        # Only one honor line should render — no stray entries for the invalid ones.
+        assert latex.count("Real Honor") == 1
+
+    def test_no_honors_key_produces_same_content_as_before(self, sample_resume_data):
+        """Regression: resumes without an 'honors' field must render the exact
+        same visible content as before this feature existed (compile-parity)."""
+        latex = inject_into_template(sample_resume_data)
+        for expected in ("Jane Doe", "jane@example.com", "Acme Corp", "Python", "InternTracker"):
+            assert expected in latex
+        assert "Honors" not in latex
+
+    def test_honors_present_in_modern_template_too(self, sample_resume_data):
+        data = dict(sample_resume_data)
+        data["honors"] = ["AP Scholar, 2022-2023"]
+        latex = inject_into_template(data, "modern")
+        assert "Honors \\& Awards" in latex
+        assert "AP Scholar, 2022-2023" in latex
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +342,52 @@ class TestCompileToSinglePage:
             compile_to_single_page(latex)
 
         assert sizes_used == FONT_SIZES
+
+
+# ---------------------------------------------------------------------------
+# compile_resume_json_to_pdf — template_id threading + classic byte-identity
+# guarantee (compile-engine parity rule; shared by value with internship-mcp).
+# ---------------------------------------------------------------------------
+
+class TestCompileResumeJsonToPdfTemplateId:
+    def _patched(self):
+        """Short-circuits the widow-backstop and spacing-stretch loops (cap<=0
+        breaks them on the first iteration) and the font-grow branch (fill
+        ratio pinned at exactly UNDERFILL_RATIO, so neither '< UNDERFILL_RATIO'
+        branch fires), so _compile_at's own output is the only thing that can
+        make two calls differ — which happens iff template_id changed the
+        injected LaTeX.
+        """
+        return (
+            patch("resume_tailor.tailor_resume._compile_at", side_effect=lambda latex, size, preset="tight": latex.encode()),
+            patch("resume_tailor.tailor_resume._count_pdf_pages", return_value=1),
+            patch("resume_tailor.tailor_resume._page1_fill_ratio", return_value=0.85),
+            patch("resume_tailor.tailor_resume.max_full_line_len", return_value=0),
+        )
+
+    def test_omitting_template_id_matches_explicit_classic(self, sample_resume_data):
+        """Every pre-existing caller (MCP /api/v1/resume/compile, the vendored
+        internship-mcp copy) never passes template_id — this must be byte-identical
+        to explicitly passing 'classic'."""
+        p1, p2, p3, p4 = self._patched()
+        with p1, p2, p3, p4:
+            pdf_default, diag_default = compile_resume_json_to_pdf(sample_resume_data)
+        p1, p2, p3, p4 = self._patched()
+        with p1, p2, p3, p4:
+            pdf_classic, diag_classic = compile_resume_json_to_pdf(sample_resume_data, template_id="classic")
+
+        assert pdf_default == pdf_classic
+        assert diag_default == diag_classic
+
+    def test_modern_template_id_produces_different_output(self, sample_resume_data):
+        p1, p2, p3, p4 = self._patched()
+        with p1, p2, p3, p4:
+            pdf_classic, _ = compile_resume_json_to_pdf(sample_resume_data, template_id="classic")
+        p1, p2, p3, p4 = self._patched()
+        with p1, p2, p3, p4:
+            pdf_modern, _ = compile_resume_json_to_pdf(sample_resume_data, template_id="modern")
+
+        assert pdf_classic != pdf_modern
 
 
 # ---------------------------------------------------------------------------

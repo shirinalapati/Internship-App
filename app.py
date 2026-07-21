@@ -1945,7 +1945,7 @@ async def critique_rewrite_endpoint(request: Request, user_id: str = Depends(req
 
     from quota import get_tailor_quota_status, record_tailor_request, WEEKLY_TAILOR_LIMIT
     from resume_critique.critique_resume import apply_critique_rewrite, to_compile_schema
-    from resume_tailor.tailor_resume import compile_resume_json_to_pdf, get_bullet_page_positions
+    from resume_tailor.tailor_resume import compile_resume_json_to_pdf, get_bullet_page_positions, TEMPLATE_REGISTRY
 
     try:
         body = await request.json()
@@ -1954,6 +1954,7 @@ async def critique_rewrite_endpoint(request: Request, user_id: str = Depends(req
 
     structured_resume = body.get("structured_resume")
     extra_context = body.get("extra_context", "")
+    template_id = body.get("template_id", "classic")
     # Green bullets are "do more of this" exemplars, not rewrite targets — only red/yellow
     # actually get sent to the model, so rewritten_bullet_ids below is never a false label.
     critiques = [c for c in (body.get("critiques") or []) if c.get("severity") in ("red", "yellow")]
@@ -1962,6 +1963,8 @@ async def critique_rewrite_endpoint(request: Request, user_id: str = Depends(req
         raise HTTPException(status_code=400, detail="structured_resume is required")
     if not critiques:
         raise HTTPException(status_code=400, detail="No red/yellow critiques to rewrite")
+    if template_id not in TEMPLATE_REGISTRY:
+        raise HTTPException(status_code=400, detail=f"Unknown template_id: {template_id}")
 
     if TRACK_USAGE:
         db = get_db()
@@ -1985,7 +1988,7 @@ async def critique_rewrite_endpoint(request: Request, user_id: str = Depends(req
 
     try:
         rewritten = apply_critique_rewrite(structured_resume, critiques, extra_context)
-        pdf_bytes, _diagnostics = compile_resume_json_to_pdf(to_compile_schema(rewritten))
+        pdf_bytes, _diagnostics = compile_resume_json_to_pdf(to_compile_schema(rewritten), template_id=template_id)
         try:
             bullet_positions = get_bullet_page_positions(pdf_bytes, rewritten)
         except Exception as e:
