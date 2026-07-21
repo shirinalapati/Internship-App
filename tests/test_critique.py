@@ -473,6 +473,36 @@ class TestCritiqueRewriteEndpoint:
         sent_critiques = mock_rewrite.call_args[0][1]
         assert [c["bullet_id"] for c in sent_critiques] == ["b2"]
 
+    def test_template_id_threaded_to_compile(self, client):
+        with patch(
+            "resume_critique.critique_resume.apply_critique_rewrite", return_value=REWRITTEN_PAYLOAD
+        ), patch(
+            "resume_tailor.tailor_resume.compile_resume_json_to_pdf",
+            return_value=(b"%PDF-fake-bytes", {"pages": 1}),
+        ) as mock_compile:
+            resp = client.post(
+                "/api/critique-resume/rewrite",
+                json={
+                    "structured_resume": SAMPLE_CRITIQUE_PAYLOAD,
+                    "critiques": self._critiques(),
+                    "template_id": "modern",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert mock_compile.call_args.kwargs.get("template_id") == "modern"
+
+    def test_invalid_template_id_returns_400(self, client):
+        resp = client.post(
+            "/api/critique-resume/rewrite",
+            json={
+                "structured_resume": SAMPLE_CRITIQUE_PAYLOAD,
+                "critiques": self._critiques(),
+                "template_id": "bogus-id",
+            },
+        )
+        assert resp.status_code == 400
+
     def test_weekly_tailor_quota_exceeded_returns_429(self, client):
         from job_database import SessionLocal
         from quota import record_tailor_request, WEEKLY_TAILOR_LIMIT

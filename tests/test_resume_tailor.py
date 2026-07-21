@@ -18,6 +18,7 @@ from resume_tailor.tailor_resume import (
     _count_pdf_pages,
     _escape_latex,
     _href,
+    compile_resume_json_to_pdf,
     compile_to_single_page,
     inject_into_template,
 )
@@ -273,6 +274,52 @@ class TestCompileToSinglePage:
             compile_to_single_page(latex)
 
         assert sizes_used == FONT_SIZES
+
+
+# ---------------------------------------------------------------------------
+# compile_resume_json_to_pdf — template_id threading + classic byte-identity
+# guarantee (compile-engine parity rule; shared by value with internship-mcp).
+# ---------------------------------------------------------------------------
+
+class TestCompileResumeJsonToPdfTemplateId:
+    def _patched(self):
+        """Short-circuits the widow-backstop and spacing-stretch loops (cap<=0
+        breaks them on the first iteration) and the font-grow branch (fill
+        ratio pinned at exactly UNDERFILL_RATIO, so neither '< UNDERFILL_RATIO'
+        branch fires), so _compile_at's own output is the only thing that can
+        make two calls differ — which happens iff template_id changed the
+        injected LaTeX.
+        """
+        return (
+            patch("resume_tailor.tailor_resume._compile_at", side_effect=lambda latex, size, preset="tight": latex.encode()),
+            patch("resume_tailor.tailor_resume._count_pdf_pages", return_value=1),
+            patch("resume_tailor.tailor_resume._page1_fill_ratio", return_value=0.85),
+            patch("resume_tailor.tailor_resume.max_full_line_len", return_value=0),
+        )
+
+    def test_omitting_template_id_matches_explicit_classic(self, sample_resume_data):
+        """Every pre-existing caller (MCP /api/v1/resume/compile, the vendored
+        internship-mcp copy) never passes template_id — this must be byte-identical
+        to explicitly passing 'classic'."""
+        p1, p2, p3, p4 = self._patched()
+        with p1, p2, p3, p4:
+            pdf_default, diag_default = compile_resume_json_to_pdf(sample_resume_data)
+        p1, p2, p3, p4 = self._patched()
+        with p1, p2, p3, p4:
+            pdf_classic, diag_classic = compile_resume_json_to_pdf(sample_resume_data, template_id="classic")
+
+        assert pdf_default == pdf_classic
+        assert diag_default == diag_classic
+
+    def test_modern_template_id_produces_different_output(self, sample_resume_data):
+        p1, p2, p3, p4 = self._patched()
+        with p1, p2, p3, p4:
+            pdf_classic, _ = compile_resume_json_to_pdf(sample_resume_data, template_id="classic")
+        p1, p2, p3, p4 = self._patched()
+        with p1, p2, p3, p4:
+            pdf_modern, _ = compile_resume_json_to_pdf(sample_resume_data, template_id="modern")
+
+        assert pdf_classic != pdf_modern
 
 
 # ---------------------------------------------------------------------------
