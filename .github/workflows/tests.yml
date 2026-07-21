@@ -31,11 +31,16 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      # System deps needed by pdfplumber / pytesseract
+      # System deps needed by pdfplumber / pytesseract, and texlive so the
+      # real-pdflatex-compile tests (test_widows.py, test_mcp_api.py::TestCompileCore)
+      # actually run instead of being skipped — this is the same package set as
+      # Dockerfile installs, and the set integration-tests.yml already uses.
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq tesseract-ocr tesseract-ocr-eng
+          sudo apt-get install -y -qq \
+            tesseract-ocr tesseract-ocr-eng \
+            texlive-latex-base texlive-fonts-recommended texlive-latex-extra poppler-utils
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt pytest pytest-cov
