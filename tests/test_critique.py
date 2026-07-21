@@ -130,6 +130,96 @@ class TestCritiqueResumeToJson:
             with pytest.raises(RuntimeError, match="max_tokens"):
                 critique_resume_to_json("resume text")
 
+    def test_honors_preserved_verbatim(self):
+        """Bug #79 (content-fidelity): an Honors & Awards section under Education
+        must survive the parse, not be silently dropped."""
+        from resume_critique.critique_resume import critique_resume_to_json
+
+        payload = {
+            **SAMPLE_CRITIQUE_PAYLOAD,
+            "honors": [
+                "AP Scholar, 2022-2023",
+                "AP Scholar with Honor, 2024",
+                "Level 3, State Honors in Piano, Music Teachers Association of California, 2021-2022",
+            ],
+        }
+        with patch("resume_critique.critique_resume.anthropic.Anthropic") as MockClient:
+            MockClient.return_value.messages.create.return_value = _mock_response(payload)
+            result = critique_resume_to_json("resume text")
+
+        assert result["honors"] == [
+            "AP Scholar, 2022-2023",
+            "AP Scholar with Honor, 2024",
+            "Level 3, State Honors in Piano, Music Teachers Association of California, 2021-2022",
+        ]
+
+    def test_honors_defaults_to_empty_list_when_absent(self):
+        """SAMPLE_CRITIQUE_PAYLOAD has no 'honors' key — must not KeyError, and must
+        normalize to []."""
+        from resume_critique.critique_resume import critique_resume_to_json
+
+        with patch("resume_critique.critique_resume.anthropic.Anthropic") as MockClient:
+            MockClient.return_value.messages.create.return_value = _mock_response(SAMPLE_CRITIQUE_PAYLOAD)
+            result = critique_resume_to_json("resume text")
+
+        assert result["honors"] == []
+
+    def test_honors_non_list_normalizes_to_empty_list(self):
+        """A malformed (non-list) 'honors' field from the model must not crash the
+        pipeline — normalize defensively to []."""
+        from resume_critique.critique_resume import critique_resume_to_json
+
+        payload = {**SAMPLE_CRITIQUE_PAYLOAD, "honors": "not a list"}
+        with patch("resume_critique.critique_resume.anthropic.Anthropic") as MockClient:
+            MockClient.return_value.messages.create.return_value = _mock_response(payload)
+            result = critique_resume_to_json("resume text")
+
+        assert result["honors"] == []
+
+    def test_honors_drops_non_string_and_blank_entries(self):
+        from resume_critique.critique_resume import critique_resume_to_json
+
+        payload = {**SAMPLE_CRITIQUE_PAYLOAD, "honors": ["Real honor", "", None, 42, "  "]}
+        with patch("resume_critique.critique_resume.anthropic.Anthropic") as MockClient:
+            MockClient.return_value.messages.create.return_value = _mock_response(payload)
+            result = critique_resume_to_json("resume text")
+
+        assert result["honors"] == ["Real honor"]
+
+
+# ---------------------------------------------------------------------------
+# to_compile_schema — honors passthrough (Bug #79 fix)
+# ---------------------------------------------------------------------------
+
+class TestToCompileSchemaHonors:
+    def test_honors_passthrough_when_present(self):
+        from resume_critique.critique_resume import to_compile_schema
+
+        structured = {**SAMPLE_CRITIQUE_PAYLOAD, "honors": ["AP Scholar, 2022-2023"]}
+        result = to_compile_schema(structured)
+        assert result["honors"] == ["AP Scholar, 2022-2023"]
+
+    def test_honors_defaults_to_empty_list_when_absent(self):
+        """SAMPLE_CRITIQUE_PAYLOAD predates the honors field — to_compile_schema must
+        not KeyError and must default honors to [] so downstream template rendering
+        (which checks truthiness) behaves exactly as it did before this field existed."""
+        from resume_critique.critique_resume import to_compile_schema
+
+        assert "honors" not in SAMPLE_CRITIQUE_PAYLOAD
+        result = to_compile_schema(SAMPLE_CRITIQUE_PAYLOAD)
+        assert result["honors"] == []
+
+    def test_bullets_still_converted_to_plain_strings(self):
+        """Regression: adding honors passthrough must not disturb the existing
+        {id, text} -> text bullet conversion for experience/projects."""
+        from resume_critique.critique_resume import to_compile_schema
+
+        result = to_compile_schema(SAMPLE_CRITIQUE_PAYLOAD)
+        assert result["experience"][0]["bullets"] == [
+            "Utilized Python to help build features",
+            "Reduced query latency 43% by adding a Redis cache serving 2M req/day",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # quota.py — critique quota helpers

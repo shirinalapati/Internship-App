@@ -41,9 +41,15 @@ KEYWORD ALIGNMENT (rephrase existing, never invent):
 - Job says "AI agents" → describe the real agentic order-automation work using that language.
 - Do NOT write a new bullet to cover a job requirement the resume never addressed.
 
-SKILLS ACCURACY:
+SKILLS ACCURACY — ONLY FROM AN EXPLICIT SECTION:
 - Copy skill values faithfully from the resume. Do not rename tools (e.g. "Anthropic/OpenAI/Gemini API" must stay as-is, not become "Claude/OpenAI/Gemini API").
 - Organize skills into dict categories; do not drop demonstrated skills from the original resume.
+- Only populate "skills" when the source resume has an EXPLICIT skills/technologies/tools section — a labeled section (e.g. "Skills", "Technical Skills") or a clearly-delineated tech-stack line. Do NOT infer or synthesize a skills list from technology names that merely appear in passing inside experience/project bullets. If the source has no explicit skills section, return "skills": {}.
+- NEGATIVE EXAMPLE (do NOT do this): bullets mention "Python", "Java", "HTML" in project descriptions and "machine learning" in an experience bullet, but there is no labeled Skills/Technologies section anywhere → the correct output is "skills": {}, NOT {"Programming Languages": "Python, Java, HTML", "Technical Areas": "Machine Learning"}. Naming a tool while describing what you built is not the same as the candidate listing it as a skill.
+
+HONORS & AWARDS — PRESERVE, DO NOT DROP:
+- If the source resume has an "Honors & Awards", "Certifications", or "Activities" section (commonly near Education) that doesn't fit experience/projects/education/skills, put every line item VERBATIM into the "honors" list (plain strings). Never silently drop this content just because it has no other home in the schema.
+- A resume with no such section returns "honors": [].
 
 SPECIFICITY (never drop metrics):
 - Preserve all original numbers, percentages, counts, and deployment evidence in every bullet.
@@ -112,8 +118,9 @@ DENSITY (fill every line with real substance):
 
 JSON CONTRACT:
 - Return ONLY valid JSON — no markdown fences, no commentary.
-- All fields required: name, email, phone, website, github, linkedin, experience, education, skills, projects.
-- skills must be a dict of string-to-string (category → comma-separated values), not a list."""
+- All fields required: name, email, phone, website, github, linkedin, experience, education, honors, skills, projects.
+- skills must be a dict of string-to-string (category → comma-separated values), not a list. Empty object {} when the source has no explicit skills section.
+- honors must be a list of plain strings. Empty list [] when the source has no honors/awards/certifications section."""
 
 
 def extract_text_from_pdf(file_content: bytes) -> str:
@@ -186,6 +193,7 @@ def tailor_resume_to_json(
                     '  "education": [\n'
                     '    {"school": "...", "location": "City, ST", "degree": "...", "dates": "..."}\n'
                     "  ],\n"
+                    '  "honors": ["AP Scholar, 2022-2023", "..."],\n'
                     '  "skills": {\n'
                     '    "Programming Languages": "Python, Java",\n'
                     '    "Frameworks & Libraries": "React.js, Node.js",\n'
@@ -194,7 +202,10 @@ def tailor_resume_to_json(
                     '  "projects": [\n'
                     '    {"name": "Project Name (Tech1, Tech2)", "dates": "...", "bullets": ["..."]}\n'
                     "  ]\n"
-                    "}"
+                    "}\n"
+                    '"honors" is [] when the source has no honors/awards/certifications section — '
+                    "preserve it verbatim, do not drop it. \"skills\" is {} when the source has no "
+                    "explicit skills section — do not synthesize one from technologies mentioned in bullets."
                 ),
             }
         ],
@@ -433,6 +444,18 @@ def inject_into_template(data: dict, template_id: str = "classic") -> str:
         )
     education_latex = "\n\n".join(edu_blocks) if edu_blocks else "No education listed."
 
+    # Build honors section — plain lines (no bullets), only rendered when non-empty so a
+    # resume with no honors/awards content doesn't get an empty section header.
+    honors_list = [h for h in data.get("honors", []) if isinstance(h, str) and h.strip()]
+    if honors_list:
+        honor_lines = []
+        for i, honor in enumerate(honors_list):
+            ending = " \\\\" if i < len(honors_list) - 1 else ""
+            honor_lines.append(f"{_escape_latex(honor)}{ending}")
+        honors_latex = "\\section{Honors \\& Awards}\n" + "\n".join(honor_lines)
+    else:
+        honors_latex = ""
+
     # Build skills section — bold category labels, one per line
     skills_data = data.get("skills", {})
     if isinstance(skills_data, dict):
@@ -482,6 +505,7 @@ def inject_into_template(data: dict, template_id: str = "classic") -> str:
     template = template.replace("{{GITHUB}}", github_latex)
     template = template.replace("{{LINKEDIN}}", linkedin_latex)
     template = template.replace("{{EDUCATION}}", education_latex)
+    template = template.replace("{{HONORS}}", honors_latex)
     template = template.replace("{{SKILLS}}", skills_latex)
     template = template.replace("{{EXPERIENCE_BULLETS}}", experience_latex)
     template = template.replace("{{PROJECTS}}", projects_latex)

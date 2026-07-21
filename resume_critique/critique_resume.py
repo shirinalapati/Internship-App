@@ -24,11 +24,34 @@ specific, verifiable criteria — not vibes. "Excellent communicator" is not sho
 
 TASK 1 — PARSE
 Parse the resume text into structured JSON, faithfully preserving all real content. Never invent
-facts, companies, dates, or numbers that are not in the source text.
+facts, companies, dates, or numbers that are not in the source text. This includes sections that
+don't fit neatly into experience/projects/education — most commonly an "Honors & Awards",
+"Certifications", or "Activities" block near Education. Put every line item from such a section
+into the "honors" list VERBATIM (plain strings, one per line item — do not summarize, merge, or
+drop any of them). A resume with no such section returns "honors": [].
+- EXAMPLE (do this): source has "Academic Honors and Awards / AP Scholar, 2022-2023 / AP Scholar
+  with Honor, 2024 / Level 3, State Honors in Piano, Music Teachers Association of California,
+  2021-2022" → "honors": ["AP Scholar, 2022-2023", "AP Scholar with Honor, 2024", "Level 3, State
+  Honors in Piano, Music Teachers Association of California, 2021-2022"]. Do NOT drop this section
+  just because it doesn't map to experience/projects/education/skills.
 
 Assign every bullet inside "experience" and "projects" entries a sequential id "b1", "b2", "b3", ...
 in reading order (top to bottom of the resume, experience before projects, first bullet of an entry
-before the next). Bullets inside "education" or "skills" do NOT get ids and are never critiqued.
+before the next). Bullets inside "education", "skills", or "honors" do NOT get ids and are never
+critiqued.
+
+SKILLS — ONLY FROM AN EXPLICIT SECTION (do not infer from passing mentions):
+Only populate "skills" when the source resume has an EXPLICIT skills/technologies/tools section —
+a labeled section (e.g. "Skills", "Technical Skills", "Technologies") or a clearly-delineated
+tech-stack line. Do NOT infer or synthesize a skills list from technology names that merely appear
+in passing inside experience/project bullets. If the source resume has no explicit skills section,
+return "skills" as an empty object {}.
+- NEGATIVE EXAMPLE (do NOT do this): a resume's bullets mention "Python", "Java", "HTML" in GitHub
+  project descriptions and "machine learning" in an experience bullet, but there is no labeled
+  Skills/Technologies section anywhere in the resume → the correct output is "skills": {}, NOT
+  {"Programming Languages": "Python, Java, HTML", "Technical Areas": "Machine Learning"}. Mentioning
+  a technology while describing what you built is not the same as the candidate listing it as a
+  skill — do not fabricate a skills section that doesn't exist in the source.
 
 TASK 2 — DETECT OR APPLY INDUSTRY
 If the caller supplies a target_category, use that value verbatim in "detected_category" and do not
@@ -72,6 +95,7 @@ Return ONLY valid JSON (no markdown fences) with this exact structure:
 {
   "name": "Full Name", "email": "...", "phone": "...", "website": "...", "github": "...", "linkedin": "...",
   "education": [{"school": "...", "location": "City, ST", "degree": "...", "dates": "..."}],
+  "honors": ["AP Scholar, 2022-2023", "..."],
   "experience": [
     {"company": "...", "location": "City, ST", "title": "...", "dates": "...",
      "bullets": [{"id": "b1", "text": "..."}]}
@@ -82,7 +106,9 @@ Return ONLY valid JSON (no markdown fences) with this exact structure:
   "skills": {"Programming Languages": "Python, Java", "Frameworks & Libraries": "React, Node.js"},
   "detected_category": "software",
   "critiques": [{"bullet_id": "b1", "severity": "red", "comment": "..."}]
-}"""
+}
+"honors" is [] when the resume has no such section. "skills" is {} when the resume has no explicit
+skills/technologies section (see rule above) — do not leave either field out of the JSON."""
 
 
 def critique_resume_to_json(resume_text: str, target_category=None, system_prompt=None, temperature=None) -> dict:
@@ -127,6 +153,9 @@ def critique_resume_to_json(resume_text: str, target_category=None, system_promp
         c for c in data.get("critiques", [])
         if isinstance(c, dict) and c.get("severity") in ("red", "yellow", "green") and c.get("bullet_id")
     ]
+    data["honors"] = [
+        h.strip() for h in data.get("honors", []) if isinstance(h, str) and h.strip()
+    ] if isinstance(data.get("honors"), list) else []
     return data
 
 
@@ -192,13 +221,15 @@ the technologies and the general category of work (e.g. "built the frontend and 
 product.
 
 4. Preserve the exact same JSON structure: same sections, same entries in the same order, same bullet
-   ids, same non-bullet fields (name, email, education, skills, detected_category, etc.) unchanged.
+   ids, same non-bullet fields (name, email, education, honors, skills, detected_category, etc.)
+   unchanged — including "honors", which has no bullet ids and is never a rewrite target.
 5. Do not add or remove bullets, entries, or sections.
 
 Return ONLY valid JSON (no markdown fences), same shape as the input resume (bullets keep their "id"):
 {
   "name": "...", "email": "...", "phone": "...", "website": "...", "github": "...", "linkedin": "...",
   "education": [{"school": "...", "location": "...", "degree": "...", "dates": "..."}],
+  "honors": ["..."],
   "experience": [
     {"company": "...", "location": "...", "title": "...", "dates": "...",
      "bullets": [{"id": "b1", "text": "..."}]}
@@ -255,8 +286,13 @@ def apply_critique_rewrite(
 
 def to_compile_schema(structured_resume: dict) -> dict:
     """Convert critique's {id, text} bullet objects into the plain-string bullet lists
-    that resume_tailor.compile_resume_json_to_pdf / inject_into_template expect."""
+    that resume_tailor.compile_resume_json_to_pdf / inject_into_template expect.
+
+    "honors" (a plain list of strings) passes through unchanged — it carries no bullet
+    ids and needs no shape conversion — defaulting to [] when absent so a resume with
+    no honors section renders identically to before this field existed."""
     data = dict(structured_resume)
+    data["honors"] = data.get("honors") or []
     for section in ("experience", "projects"):
         entries = []
         for entry in data.get(section, []):
