@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth, SignInButton } from '@clerk/react';
 import { Upload, CheckCircle2, Sparkles, Eye, PenLine, Download } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -1024,6 +1025,19 @@ const CritiquePage: React.FC = () => {
     submitResume(file, newCategory);
   };
 
+  // Issue #81 — the critique review/compare screens had no way to leave except the
+  // browser's own back button. Resets to the pre-upload state; sessionStorage clears
+  // itself via the persistence effect above once `result` goes null.
+  const handleBack = () => {
+    setFile(null);
+    setResult(null);
+    setTailoredResult(null);
+    setError('');
+    setCategory('');
+    setExtraContext('');
+    setTailorMode('idle');
+  };
+
   const handleGenerate = async () => {
     if (!result) return;
     const rewritable = result.critiques.filter((c) => c.severity !== 'green');
@@ -1269,12 +1283,29 @@ const CritiquePage: React.FC = () => {
           [style*="pulseDot"] { animation: none !important; }
         }`}</style>
 
-      {/* Minimal focused-task header — full site nav lives on the pre-upload screen above */}
+      {/* Focused-task header — compact, but keeps site nav reachable instead of stranding
+          the user once they've uploaded (see issue #81). */}
       <header className="flex items-center justify-between px-9 py-4 border-b border-lp-border">
-        <div className="flex items-center gap-3.5">
-          <Logo size={24} />
-          <div className="w-px h-5" style={{ background: 'rgba(31,27,22,0.15)' }} />
-          <div className="text-sm font-semibold tracking-wide">Critique</div>
+        <div className="flex items-center gap-6">
+          <Link to="/" className="flex items-center gap-3.5 no-underline">
+            <Logo size={24} />
+            <div className="w-px h-5" style={{ background: 'rgba(31,27,22,0.15)' }} />
+            <div className="text-sm font-semibold tracking-wide text-text-primary">Critique</div>
+          </Link>
+          <nav className="hidden sm:flex items-center gap-4">
+            <Link to="/find" className="font-mono text-xs text-text-secondary hover:text-text-primary transition-colors">
+              Find
+            </Link>
+            <Link to="/saved" className="font-mono text-xs text-text-secondary hover:text-text-primary transition-colors">
+              Saved
+            </Link>
+            <Link to="/history" className="font-mono text-xs text-text-secondary hover:text-text-primary transition-colors">
+              History
+            </Link>
+            <Link to="/usage" className="font-mono text-xs text-text-secondary hover:text-text-primary transition-colors">
+              Usage
+            </Link>
+          </nav>
         </div>
         {file && (
           <div className="flex items-center gap-3.5">
@@ -1380,6 +1411,36 @@ const CritiquePage: React.FC = () => {
               hovered={hovered}
               onHover={setHovered}
             />
+
+            {/* Issue #81 — floating back button, symmetric with the Tailor résumé pill
+                on the opposite corner. Resets to the pre-upload state. */}
+            <button
+              type="button"
+              onClick={handleBack}
+              style={{
+                position: 'absolute',
+                left: 28,
+                bottom: 28,
+                zIndex: 5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 9,
+                height: 46,
+                padding: '0 20px',
+                borderRadius: 999,
+                background: '#F1F5F9',
+                color: '#0F172A',
+                fontWeight: 600,
+                fontSize: 14,
+                fontFamily: "'Source Sans 3', sans-serif",
+                border: 'none',
+                boxShadow: `inset 3px 0 0 ${TAILOR_ACCENT}, 0 8px 22px rgba(0,0,0,0.4)`,
+                cursor: 'pointer',
+              }}
+            >
+              <span aria-hidden="true">←</span>
+              <span>Back</span>
+            </button>
 
             <TailorTrigger
               mode={tailorMode}
