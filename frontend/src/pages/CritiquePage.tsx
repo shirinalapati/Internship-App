@@ -1462,7 +1462,37 @@ const CritiquePage: React.FC = () => {
 
       {/* Result state — a tailored version exists: Current/Tailored tabs + Single/Compare */}
       {result && tailoredResult && (
-        <div className="max-w-[1060px] mx-auto px-6" style={{ paddingTop: 26, paddingBottom: 100 }}>
+        <div className="max-w-[1060px] mx-auto px-6" style={{ paddingTop: 26, paddingBottom: 100, position: 'relative' }}>
+          {/* Issue #81 — same floating back button as the critique review screen (see
+              handleBack above), so leaving the flow works identically on both screens. */}
+          <button
+            type="button"
+            onClick={handleBack}
+            style={{
+              position: 'fixed',
+              left: 28,
+              bottom: 28,
+              zIndex: 5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 9,
+              height: 46,
+              padding: '0 20px',
+              borderRadius: 999,
+              background: '#F1F5F9',
+              color: '#0F172A',
+              fontWeight: 600,
+              fontSize: 14,
+              fontFamily: "'Source Sans 3', sans-serif",
+              border: 'none',
+              boxShadow: `inset 3px 0 0 ${TAILOR_ACCENT}, 0 8px 22px rgba(0,0,0,0.4)`,
+              cursor: 'pointer',
+            }}
+          >
+            <span aria-hidden="true">←</span>
+            <span>Back</span>
+          </button>
+
           <div
             className="flex items-end justify-between gap-5 flex-wrap"
             style={{ borderBottom: '1px solid rgba(31,27,22,0.14)', marginBottom: 8 }}
