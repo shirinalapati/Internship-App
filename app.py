@@ -1603,6 +1603,31 @@ async def database_stats(request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to get database stats: {str(e)}")
 
 
+@app.get("/api/companies")
+@limiter.limit("30/minute")
+async def list_companies(request: Request, q: str = ""):
+    """
+    Distinct company names across currently-active postings — backs the
+    avoid/target-company filter autocomplete. Matching against these exact
+    scraped strings (instead of a hand-typed guess) avoids canonicalization
+    mismatches like "JPMorgan Chase" vs the scraped "JP Morgan Chase".
+
+    Cached (Redis, ~2h TTL, refreshed on every scrape) via job_cache — this
+    endpoint should almost never hit the database directly.
+    """
+    try:
+        companies = job_cache.get_cached_companies()
+        query = q.strip().lower()
+        if query:
+            companies = [c for c in companies if query in c.lower()]
+        return JSONResponse(
+            {"success": True, "companies": companies[:200]},
+            headers={"Cache-Control": "public, max-age=300, stale-while-revalidate=3600"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list companies: {str(e)}")
+
+
 @app.get("/api/refresh-health")
 @limiter.limit("10/minute")
 async def refresh_health(request: Request):

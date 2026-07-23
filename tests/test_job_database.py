@@ -19,6 +19,7 @@ from job_database import (
     engine,
     generate_job_hash,
     get_active_jobs,
+    get_distinct_active_companies,
     get_job_by_hash,
     get_database_stats,
     get_resume_cache,
@@ -347,6 +348,34 @@ class TestGetActiveJobs:
 
         jobs = get_active_jobs()
         assert len(jobs) == 2
+
+
+# ---------------------------------------------------------------------------
+# get_distinct_active_companies — backs the avoid/target-company autocomplete
+# ---------------------------------------------------------------------------
+class TestGetDistinctActiveCompanies:
+    def test_returns_sorted_distinct_names(self):
+        bulk_insert_jobs([
+            _job(company="Zeta Corp", n=0),
+            _job(company="Acme", n=1),
+            _job(company="Acme", n=2),  # same company, different posting
+        ])
+        assert get_distinct_active_companies() == ["Acme", "Zeta Corp"]
+
+    def test_excludes_inactive_jobs(self):
+        bulk_insert_jobs([_job(company="Acme", n=0), _job(company="Beta", n=1)])
+        db = SessionLocal()
+        try:
+            job = db.query(Job).filter(Job.company == "Beta").first()
+            job.is_active = False
+            db.commit()
+        finally:
+            db.close()
+
+        assert get_distinct_active_companies() == ["Acme"]
+
+    def test_empty_database_returns_empty_list(self):
+        assert get_distinct_active_companies() == []
 
 
 # ---------------------------------------------------------------------------

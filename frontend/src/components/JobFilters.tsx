@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { SlidersHorizontal, ChevronDown, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import TagAutocomplete from './ui/tag-autocomplete';
-import { LOCATION_SUGGESTIONS, COMPANY_SUGGESTIONS } from '../lib/filterSuggestions';
+import { LOCATION_SUGGESTIONS } from '../lib/filterSuggestions';
+import { useCompanySuggestions } from '../hooks/useCompanySuggestions';
 import {
   CitizenshipPref,
   POSITION_OPTIONS,
@@ -68,6 +69,7 @@ const focusRing =
 
 const JobFilters: React.FC<JobFiltersProps> = ({ value, onChange, disabled, alwaysOpen }) => {
   const [open, setOpen] = useState(false);
+  const { companies: companySuggestions } = useCompanySuggestions();
   const active = isFilterActive(value);
   const expanded = alwaysOpen || open;
 
@@ -247,7 +249,7 @@ const JobFilters: React.FC<JobFiltersProps> = ({ value, onChange, disabled, alwa
             <TagAutocomplete
               value={value.avoidCompanies}
               onChange={(avoidCompanies) => onChange({ ...value, avoidCompanies })}
-              suggestions={COMPANY_SUGGESTIONS}
+              suggestions={companySuggestions}
               placeholder="Type a company to exclude…"
               disabled={disabled}
               ariaLabel="Add a company to avoid"

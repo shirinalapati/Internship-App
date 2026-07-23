@@ -928,6 +928,32 @@ def get_active_jobs(limit: Optional[int] = None, offset: int = 0, max_days_old: 
         close_db(db)
 
 
+def get_distinct_active_companies() -> List[str]:
+    """
+    Distinct company names across active job postings, sorted alphabetically.
+
+    Backs the avoid/target-company filter autocomplete — matching against these
+    exact scraped strings (instead of a hand-typed guess) avoids canonicalization
+    mismatches like "JPMorgan Chase" vs the scraped "JP Morgan Chase". Small
+    result set (low hundreds), so no pagination needed.
+    """
+    db = get_db()
+    try:
+        rows = (
+            db.query(Job.company)
+            .filter(Job.is_active == True, Job.company.isnot(None), Job.company != "")
+            .distinct()
+            .order_by(Job.company)
+            .all()
+        )
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.error(f"Error getting distinct active companies: {e}")
+        return []
+    finally:
+        close_db(db)
+
+
 def get_active_jobs_paginated(offset: int = 0, limit: int = 500, max_days_old: int = 30) -> List[Dict]:
     """
     Get a single page of active jobs from the database.

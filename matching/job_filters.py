@@ -123,6 +123,28 @@ def _canonical_company(company: str) -> str:
     return c
 
 
+def _company_names_match(a_canonical: str, b_canonical: str) -> bool:
+    """True if two already-canonicalized company names refer to the same
+    employer: exact match, whole-word containment in either direction, or —
+    as a last-resort fallback — equal once whitespace is stripped entirely
+    (catches spacing variants like "JP Morgan Chase" vs "JPMorgan Chase" that
+    the alias table hasn't been taught yet). The fallback is only reachable
+    once the stricter checks fail, and is guarded to reasonably long names so
+    it can't collide two short, unrelated ones.
+    """
+    if not a_canonical or not b_canonical:
+        return False
+    if a_canonical == b_canonical:
+        return True
+    if _matches_position_keyword(b_canonical, a_canonical) or _matches_position_keyword(a_canonical, b_canonical):
+        return True
+    a_spaceless = a_canonical.replace(" ", "")
+    b_spaceless = b_canonical.replace(" ", "")
+    if len(a_spaceless) >= 5 and len(b_spaceless) >= 5 and a_spaceless == b_spaceless:
+        return True
+    return False
+
+
 def _company_is_large(company: str) -> bool:
     """O(1) membership test against the curated large-company set (+ aliases).
 
@@ -248,6 +270,28 @@ _STATE_ABBREVS: Dict[str, str] = {
 }
 
 
+# Metro-nickname expansion for scraped location strings that use an
+# abbreviation instead of the full city name (SimplifyJobs listings are
+# inconsistent about this — "NYC", "SF", "LA" all show up verbatim). Without
+# this, searching the exact suggestions the UI offers ("San Francisco, CA")
+# silently misses most jobs actually located there.
+#
+# Keys are the full name a user would type (normalized); values are the
+# additional short tokens to also check. Short tokens are matched with the
+# same word-boundary regex used everywhere else in this module (see
+# _matches_position_keyword) — never a bare substring check — so "LA"
+# doesn't match inside "Atlanta" or "Dallas".
+CITY_ALIASES: Dict[str, List[str]] = {
+    "new york": ["nyc"],
+    "new york city": ["nyc"],
+    "san francisco": ["sf"],
+    "los angeles": ["la"],
+    "washington": ["dc"],
+    "washington dc": ["dc"],
+    "washington d.c.": ["dc"],
+}
+
+
 def _passes_location(job: Dict[str, Any], locations: List[str]) -> bool:
     if not locations:
         return True
@@ -260,11 +304,18 @@ def _passes_location(job: Dict[str, Any], locations: List[str]) -> bool:
             if "remote" in job_location:
                 return True
             continue
-        if loc_l in job_location:
+        # Word-boundary match, not a bare substring — a raw ", CA" (or a user
+        # typing the bare abbreviation "CA") must not match the start of
+        # ", Canada". Multi-word phrases ("san jose, ca") still match fine
+        # since the boundary only has to hold at the phrase's own edges.
+        if _matches_position_keyword(job_location, loc_l):
             return True
         abbrev = _STATE_ABBREVS.get(loc_l)
-        if abbrev and f", {abbrev}" in job_location:
+        if abbrev and re.search(rf",\s*{re.escape(abbrev)}\b", job_location):
             return True
+        for alias in CITY_ALIASES.get(loc_l, []):
+            if _matches_position_keyword(job_location, alias):
+                return True
     return False
 
 
@@ -308,15 +359,8 @@ def _passes_avoid_companies(job: Dict[str, Any], avoid_companies: List[str]) -> 
         return True
     for avoided in avoid_companies:
         a = _canonical_company(avoided)
-        if not a:
-            continue
-        # Exact canonical match, or whole-word containment in either direction.
         # Word boundaries stop "Meta" from excluding "Metamorphic Labs".
-        if (
-            a == company
-            or _matches_position_keyword(company, a)
-            or _matches_position_keyword(a, company)
-        ):
+        if _company_names_match(a, company):
             return False
     return True
 
@@ -331,13 +375,7 @@ def _passes_target_companies(job: Dict[str, Any], target_companies: List[str]) -
         return False
     for target in target_companies:
         t = _canonical_company(target)
-        if not t:
-            continue
-        if (
-            t == company
-            or _matches_position_keyword(company, t)
-            or _matches_position_keyword(t, company)
-        ):
+        if _company_names_match(t, company):
             return True
     return False
 

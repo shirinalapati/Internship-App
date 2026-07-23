@@ -125,6 +125,48 @@ class TestLocation:
         job = _job(location="Boston, MA")
         assert _passes_location(job, ["New York", "Boston"]) is True
 
+    def test_state_abbrev_does_not_leak_into_country_name(self):
+        # Regression: ", CA" must not match as a prefix of ", Canada" — found
+        # against real scraped data where a "California" search returned 24
+        # Toronto/Vancouver/Ottawa jobs (20% of the result set).
+        assert _passes_location(_job(location="Toronto, ON, Canada"), ["California"]) is False
+        assert _passes_location(_job(location="Oakville, ON, Canada"), ["CA"]) is False
+        # Real California jobs must still match.
+        assert _passes_location(_job(location="San Jose, CA"), ["California"]) is True
+
+    def test_state_abbrev_boundary_general_case(self):
+        # Same class of bug for any state whose abbreviation prefixes another
+        # word after a comma — not just CA/Canada.
+        assert _passes_location(_job(location="Orlando, FL"), ["Oregon"]) is False
+
+    def test_city_nickname_aliases(self):
+        # Regression: SimplifyJobs listings frequently use city abbreviations
+        # instead of full names. Searching the exact term the UI suggests
+        # ("San Francisco, CA") was missing the majority of real SF/NYC/LA
+        # postings because only state abbreviations were expanded, not city
+        # nicknames.
+        assert _passes_location(_job(location="SF"), ["San Francisco"]) is True
+        assert _passes_location(_job(location="NYC"), ["New York"]) is True
+        assert _passes_location(_job(location="LA"), ["Los Angeles"]) is True
+
+    def test_city_nickname_requires_a_boundary_even_in_dirty_data(self):
+        # Known limitation, not something this fix is meant to solve: when the
+        # scraper concatenates multiple locations with no delimiter ("...
+        # Miami, FLNYC"), "NYC" is glued directly onto "FL" with no boundary
+        # between them, so it correctly does NOT match — matching here would
+        # require guessing where one location string ends and the next
+        # begins, which needs the scraper-side location-normalization pass
+        # tracked as a separate follow-up, not a regex tweak.
+        assert _passes_location(
+            _job(location="4 locationsGreenwich, CTHouston, TXMiami, FLNYC"), ["New York"]
+        ) is False
+
+    def test_city_nickname_word_boundary(self):
+        # The short aliases (sf/la/nyc/dc) must not match inside unrelated
+        # words — "LA" must not match "Atlanta" or "Dallas".
+        assert _passes_location(_job(location="Atlanta, GA"), ["Los Angeles"]) is False
+        assert _passes_location(_job(location="Dallas, TX"), ["Los Angeles"]) is False
+
 
 # ---------------------------------------------------------------------------
 # _passes_position — title + description, word-boundary short tokens
@@ -177,6 +219,17 @@ class TestAvoidCompanies:
         assert _passes_avoid_companies(_job(company="Amazon.com Inc"), ["Amazon"]) is False
         assert _passes_avoid_companies(_job(company="Amazon Web Services"), ["Amazon"]) is False
 
+    def test_spaceless_fallback_matches_spacing_variant(self):
+        # Regression: "JPMorgan Chase" (as typed by a user, or the curated
+        # "Big Companies" chip label) must exclude the real scraped spelling
+        # "JP Morgan Chase" — the alias table only knew the 2-word "JP
+        # Morgan" variant, not the 3-word one with "Chase" appended.
+        assert _passes_avoid_companies(_job(company="JP Morgan Chase"), ["JPMorgan Chase"]) is False
+
+    def test_spaceless_fallback_has_a_length_guard(self):
+        # Short names must not collide via the spaceless fallback.
+        assert _passes_avoid_companies(_job(company="AB Inc"), ["A B"]) is True
+
 
 # ---------------------------------------------------------------------------
 # _passes_target_companies — include-only big-company filter
@@ -188,6 +241,9 @@ class TestTargetCompanies:
     def test_includes_only_selected(self):
         assert _passes_target_companies(_job(company="Google"), ["Google"]) is True
         assert _passes_target_companies(_job(company="TinyStartup"), ["Google"]) is False
+
+    def test_spaceless_fallback_matches_spacing_variant(self):
+        assert _passes_target_companies(_job(company="JP Morgan Chase"), ["JPMorgan Chase"]) is True
 
     def test_matches_legal_suffix_variants(self):
         assert _passes_target_companies(_job(company="Amazon.com Inc"), ["Amazon"]) is True
