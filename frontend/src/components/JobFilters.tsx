@@ -69,9 +69,11 @@ const focusRing =
 
 const JobFilters: React.FC<JobFiltersProps> = ({ value, onChange, disabled, alwaysOpen }) => {
   const [open, setOpen] = useState(false);
+  const [bigCompaniesTab, setBigCompaniesTab] = useState<'popular' | 'other'>('popular');
   const { companies: companySuggestions } = useCompanySuggestions();
   const active = isFilterActive(value);
   const expanded = alwaysOpen || open;
+  const otherTargetCompanies = value.targetCompanies.filter(c => !BIG_COMPANIES.includes(c));
 
   const activeCount =
     value.locations.length +
@@ -96,6 +98,24 @@ const JobFilters: React.FC<JobFiltersProps> = ({ value, onChange, disabled, alwa
         selected
           ? 'border-ia bg-ia-subtle text-text-primary'
           : 'border-lp-border text-text-secondary hover:border-ia/50'
+      )}
+    >
+      {label}
+    </button>
+  );
+
+  const subTab = (selected: boolean, label: string, onClick: () => void) => (
+    <button
+      key={label}
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'font-mono text-[10px] uppercase tracking-wide px-2 pb-1 border-b-2 transition-colors disabled:opacity-40',
+        focusRing,
+        selected
+          ? 'border-ia text-text-primary'
+          : 'border-transparent text-text-tertiary hover:text-text-secondary'
       )}
     >
       {label}
@@ -202,14 +222,37 @@ const JobFilters: React.FC<JobFiltersProps> = ({ value, onChange, disabled, alwa
           {/* Big companies */}
           <div>
             {sectionLabel('Big companies')}
-            <div className="flex flex-wrap gap-1.5">
-              {BIG_COMPANIES.map(name =>
-                chip(value.targetCompanies.includes(name), name, () =>
-                  onChange({ ...value, targetCompanies: toggleInArray(value.targetCompanies, name) })
-                )
-              )}
+            <div className="flex gap-3 mb-2.5">
+              {subTab(bigCompaniesTab === 'popular', 'Popular', () => setBigCompaniesTab('popular'))}
+              {subTab(bigCompaniesTab === 'other', 'Other', () => setBigCompaniesTab('other'))}
             </div>
-            <p className="font-mono text-[10px] text-text-tertiary mt-1">Pick specific employers to show only their roles.</p>
+            {bigCompaniesTab === 'popular' ? (
+              <>
+                <div className="flex flex-wrap gap-1.5">
+                  {BIG_COMPANIES.map(name =>
+                    chip(value.targetCompanies.includes(name), name, () =>
+                      onChange({ ...value, targetCompanies: toggleInArray(value.targetCompanies, name) })
+                    )
+                  )}
+                </div>
+                <p className="font-mono text-[10px] text-text-tertiary mt-1">
+                  Pick specific employers to show only their roles.
+                  {otherTargetCompanies.length > 0 && ` +${otherTargetCompanies.length} more selected via “Other”.`}
+                </p>
+              </>
+            ) : (
+              <>
+                <TagAutocomplete
+                  value={value.targetCompanies}
+                  onChange={(targetCompanies) => onChange({ ...value, targetCompanies })}
+                  suggestions={companySuggestions}
+                  placeholder="Search all companies with live postings…"
+                  disabled={disabled}
+                  ariaLabel="Search and add a company to restrict results to"
+                />
+                <p className="font-mono text-[10px] text-text-tertiary mt-1">Search the full list of companies currently posting — not just the popular ones.</p>
+              </>
+            )}
           </div>
 
           {/* Company size */}
