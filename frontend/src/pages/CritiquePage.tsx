@@ -91,212 +91,18 @@ const SEVERITY: Record<
   red: { dot: 'hsl(0 84% 60%)', ring: 'hsl(0 84% 60% / 0.16)', label: 'Rewrite', labelColor: 'hsl(0 72% 48%)' },
 };
 
-const contactLine = (r: CritiqueResult) =>
-  [r.email, r.phone, r.website, r.github].filter(Boolean).join('  ·  ');
-
 // ---------------------------------------------------------------------------
-// Tailored-result / diff view — Current vs Tailored tabs + Single/Compare toggle
+// Tailored-result view — Current vs Tailored tabs + Single/Compare toggle
 // ---------------------------------------------------------------------------
 
 interface TailoredResult {
   structured: any;
   pdfBase64: string;
   rewrittenIds: string[];
-}
-
-interface DiffBullet {
-  id: string;
-  current: string;
-  tailored: string;
-  changed: boolean;
-}
-type DiffBlock =
-  | { kind: 'header'; name: string; contact: string }
-  | { kind: 'heading'; text: string }
-  | { kind: 'entry'; title: string; date: string }
-  | { kind: 'bullets'; items: DiffBullet[] };
-
-function buildDiffBlocks(current: CritiqueResult, tailoredStructured: any, rewrittenIds: string[]): DiffBlock[] {
-  const rewrittenSet = new Set(rewrittenIds);
-  const blocks: DiffBlock[] = [{ kind: 'header', name: current.name, contact: contactLine(current) }];
-
-  if (current.experience.length > 0) {
-    blocks.push({ kind: 'heading', text: 'Experience' });
-    current.experience.forEach((exp, i) => {
-      const tExp = tailoredStructured?.experience?.[i];
-      blocks.push({ kind: 'entry', title: `${exp.title} — ${exp.company}`, date: exp.dates });
-      blocks.push({
-        kind: 'bullets',
-        items: exp.bullets.map((b, j) => ({
-          id: b.id,
-          current: b.text,
-          tailored: tExp?.bullets?.[j]?.text ?? b.text,
-          changed: rewrittenSet.has(b.id),
-        })),
-      });
-    });
-  }
-
-  if (current.projects.length > 0) {
-    blocks.push({ kind: 'heading', text: 'Projects' });
-    current.projects.forEach((proj, i) => {
-      const tProj = tailoredStructured?.projects?.[i];
-      blocks.push({ kind: 'entry', title: proj.name, date: proj.dates });
-      blocks.push({
-        kind: 'bullets',
-        items: proj.bullets.map((b, j) => ({
-          id: b.id,
-          current: b.text,
-          tailored: tProj?.bullets?.[j]?.text ?? b.text,
-          changed: rewrittenSet.has(b.id),
-        })),
-      });
-    });
-  }
-
-  return blocks;
-}
-
-// Mirrors the real compiled PDF's US Letter proportions (612x792pt, ratio 0.773) AND its
-// page-fill behavior (resume_tailor._lock_font grows font size to fill slack, shrinks to
-// avoid overflow) so the on-screen mock resume reads as an actual page instead of a fixed-font
-// column that leaves a blank void under short content or clips long content. We can't use CSS
-// `zoom` to grow — zoom scales width too, and width is fixed by the frame, so growing that way
-// would clip content on the sides. Instead we scale font sizes directly (via `fontScale`) and
-// leave padding/width untouched, then measure and converge over a few passes.
-const PAGE_WIDTH = 720;
-const PAGE_HEIGHT = Math.round(PAGE_WIDTH * (11 / 8.5));
-const FONT_SCALE_MIN = 0.65;
-const FONT_SCALE_MAX = 1.6;
-const FONT_SCALE_MAX_ITERATIONS = 4;
-
-function ResumeDiffPage({
-  blocks,
-  variant,
-  showChanges,
-  compact,
-}: {
-  blocks: DiffBlock[];
-  variant: 'current' | 'tailored';
-  showChanges: boolean;
-  compact?: boolean;
-}) {
-  const accent = variant === 'tailored' ? 'hsl(142 72% 45%)' : 'hsl(38 92% 55%)';
-  const tint = variant === 'tailored' ? 'hsl(142 72% 45% / 0.10)' : 'hsl(38 92% 55% / 0.11)';
-  const tagColor = variant === 'tailored' ? 'hsl(142 72% 34%)' : 'hsl(38 78% 38%)';
-  const tagText = variant === 'tailored' ? 'rewritten' : 'flagged';
-  const baseFs = compact ? 11 : 13;
-
-  const contentRef = useRef<HTMLDivElement>(null);
-  const [fontScale, setFontScale] = useState(1);
-  const iterationRef = useRef(0);
-
-  // Resets the search whenever the underlying content changes (new resume, new critiques).
-  React.useLayoutEffect(() => {
-    iterationRef.current = 0;
-    setFontScale(1);
-  }, [blocks]);
-
-  // Converges fontScale toward whatever fills PAGE_HEIGHT as closely as possible, in a few
-  // measure-and-correct passes (font-size changes don't scale height linearly — margins and
-  // gaps stay fixed — so one shot rarely lands exactly on target).
-  React.useLayoutEffect(() => {
-    const el = contentRef.current;
-    if (!el || iterationRef.current >= FONT_SCALE_MAX_ITERATIONS) return;
-    const measuredHeight = el.scrollHeight;
-    const ratio = PAGE_HEIGHT / measuredHeight;
-    if (Math.abs(ratio - 1) < 0.02) return;
-    const next = Math.min(FONT_SCALE_MAX, Math.max(FONT_SCALE_MIN, fontScale * ratio));
-    if (Math.abs(next - fontScale) < 0.01) return;
-    iterationRef.current += 1;
-    setFontScale(next);
-  }, [blocks, fontScale]);
-
-  const sz = (px: number) => px * fontScale;
-
-  return (
-    <div
-      style={{
-        width: PAGE_WIDTH,
-        height: PAGE_HEIGHT,
-        background: '#FDFCFA',
-        border: '1px solid rgba(31,27,22,0.08)',
-        borderRadius: 2,
-        boxShadow: '0 1px 2px rgba(31,27,22,0.08), 0 16px 48px rgba(31,27,22,0.12)',
-        boxSizing: 'border-box',
-        overflow: 'hidden',
-      }}
-    >
-    <div
-      ref={contentRef}
-      style={{
-        padding: '52px 60px 60px',
-        boxSizing: 'border-box',
-        fontFamily: "'Source Serif 4', Georgia, serif",
-        color: '#1a1a1a',
-      }}
-    >
-      {blocks.map((block, i) => {
-        if (block.kind === 'header') {
-          return (
-            <div key={i} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: sz(25), fontWeight: 700, letterSpacing: '0.01em' }}>{block.name}</div>
-              <div style={{ fontSize: sz(12), color: '#444', marginTop: 6 }}>{block.contact}</div>
-            </div>
-          );
-        }
-        if (block.kind === 'heading') {
-          return (
-            <div
-              key={i}
-              style={{
-                fontSize: sz(12), fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase',
-                borderBottom: '1px solid #1a1a1a', paddingBottom: 4, margin: '26px 0 11px',
-              }}
-            >
-              {block.text}
-            </div>
-          );
-        }
-        if (block.kind === 'entry') {
-          return (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 14 }}>
-              <div style={{ fontSize: sz(13.5), fontWeight: 700 }}>{block.title}</div>
-              <div style={{ fontSize: sz(12), fontStyle: 'italic', color: '#444', whiteSpace: 'nowrap', paddingLeft: 14 }}>{block.date}</div>
-            </div>
-          );
-        }
-        // bullets
-        return (
-          <ul key={i} style={{ listStyle: 'none', margin: '7px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {block.items.map((it) => {
-              const changed = it.changed && showChanges;
-              const text = variant === 'tailored' ? it.tailored : it.current;
-              return (
-                <li
-                  key={it.id}
-                  style={
-                    changed
-                      ? { position: 'relative', paddingLeft: 18, paddingTop: 4, paddingBottom: 4, paddingRight: 10, fontSize: sz(baseFs), lineHeight: 1.5, background: tint, boxShadow: `inset 2px 0 0 ${accent}`, borderRadius: 4 }
-                      : { position: 'relative', paddingLeft: 16, fontSize: sz(baseFs), lineHeight: 1.5 }
-                  }
-                >
-                  <span style={{ position: 'absolute', left: changed ? 8 : 2, top: changed ? 4 : 0, color: '#666' }}>•</span>
-                  {text}
-                  {changed && (
-                    <span style={{ marginLeft: 6, fontFamily: "'Source Sans 3', sans-serif", fontSize: sz(9.5), fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: tagColor, verticalAlign: '1.5px', whiteSpace: 'nowrap' }}>
-                      {tagText}
-                    </span>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        );
-      })}
-    </div>
-    </div>
-  );
+  // Real compiled PDF's per-bullet coordinates, same shape as CritiqueResult.bullet_positions
+  // (issue #79) — lets the compare screen render the actual tailored PDF instead of an HTML
+  // mockup, matching the review screen. Empty when the backend couldn't extract positions.
+  bulletPositions: BulletPosition[];
 }
 
 // ---------------------------------------------------------------------------
@@ -869,6 +675,233 @@ function CritiqueResumePdfPage({
   );
 }
 
+// Marks a rewritten bullet on the tailored PDF — same dot/tooltip mechanics as
+// BulletPositionMarker above, but keyed off "was this bullet rewritten" instead of a
+// severity flag, and always the same green accent (issue #79: match the review screen's
+// real-PDF-plus-marker rendering instead of the old HTML diff mockup).
+function TailoredBulletMarker({
+  position,
+  rewritten,
+  hovered,
+  onHover,
+}: {
+  position: BulletPosition;
+  rewritten: boolean;
+  hovered: string | null;
+  onHover: (id: string | null) => void;
+}) {
+  if (!rewritten) return null;
+  const on = hovered === position.bullet_id;
+  const accent = 'hsl(142 72% 45%)';
+  const topPct = position.top_frac * 100;
+  const leftPct = position.left_frac * 100;
+
+  return (
+    <>
+      <span
+        onMouseEnter={() => onHover(position.bullet_id)}
+        onMouseLeave={() => onHover(null)}
+        style={{
+          position: 'absolute',
+          left: `calc(${leftPct}% - ${DOT_LEFT_OFFSET_PX}px)`,
+          top: `calc(${topPct}% - 2px)`,
+          width: 24,
+          height: 22,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          transition: 'transform 0.15s ease',
+          transform: on ? 'scale(1.25)' : 'scale(1)',
+          zIndex: 20,
+        }}
+      >
+        <span
+          style={{
+            width: 9,
+            height: 9,
+            borderRadius: '50%',
+            background: accent,
+            boxShadow: `0 0 0 3px hsl(142 72% 45% / 0.16)`,
+          }}
+        />
+      </span>
+      <div
+        role="tooltip"
+        style={{
+          position: 'absolute',
+          left: 'calc(100% + 12px)',
+          top: `calc(${topPct}% - 8px)`,
+          width: 172,
+          boxSizing: 'border-box',
+          background: '#FFFFFF',
+          border: '1px solid rgba(31,27,22,0.12)',
+          borderTop: `2px solid ${accent}`,
+          borderRadius: 10,
+          padding: '9px 12px 10px',
+          boxShadow: '0 2px 6px rgba(31,27,22,0.06), 0 14px 36px rgba(31,27,22,0.12)',
+          pointerEvents: 'none',
+          zIndex: 30,
+          fontFamily: "'Source Sans 3', system-ui, sans-serif",
+          opacity: on ? 1 : 0,
+          transform: on ? 'translateX(0)' : 'translateX(-8px)',
+          transition: 'opacity 0.16s ease, transform 0.18s ease',
+        }}
+      >
+        <span
+          style={{
+            fontSize: '10.5px',
+            fontWeight: 700,
+            letterSpacing: '0.1em',
+            textTransform: 'uppercase',
+            color: 'hsl(142 72% 34%)',
+          }}
+        >
+          Rewritten
+        </span>
+      </div>
+    </>
+  );
+}
+
+// Same real-PDF-on-canvas rendering as CritiqueResumePdfPage, applied to the tailored
+// resume with "rewritten" markers instead of severity dots (issue #79 — the compare
+// screen previously fell back to the old HTML mockup even after the review screen
+// switched to a real PDF render).
+function TailoredResumePdfPage({
+  pdfBase64,
+  bulletPositions,
+  rewrittenIds,
+  hovered,
+  onHover,
+}: {
+  pdfBase64?: string;
+  bulletPositions: BulletPosition[];
+  rewrittenIds: string[];
+  hovered: string | null;
+  onHover: (id: string | null) => void;
+}) {
+  const rewrittenSet = React.useMemo(() => new Set(rewrittenIds), [rewrittenIds]);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [renderSize, setRenderSize] = useState<{ width: number; height: number } | null>(null);
+  const [renderError, setRenderError] = useState('');
+
+  useEffect(() => {
+    if (!pdfBase64) return;
+    let cancelled = false;
+    let task: ReturnType<typeof pdfjsLib.getDocument> | null = null;
+
+    (async () => {
+      try {
+        const byteChars = atob(pdfBase64);
+        const bytes = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+
+        task = pdfjsLib.getDocument({ data: bytes });
+        const pdf = await task.promise;
+        const page = await pdf.getPage(1);
+        if (cancelled) return;
+
+        const baseViewport = page.getViewport({ scale: 1 });
+        const cssScale = PDF_PAGE_WIDTH / baseViewport.width;
+        const dpr = window.devicePixelRatio || 1;
+        const renderViewport = page.getViewport({ scale: cssScale * dpr });
+
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d');
+        if (!canvas || !ctx) return;
+
+        canvas.width = renderViewport.width;
+        canvas.height = renderViewport.height;
+        canvas.style.width = `${cssScale * baseViewport.width}px`;
+        canvas.style.height = `${cssScale * baseViewport.height}px`;
+
+        await page.render({ canvasContext: ctx, viewport: renderViewport }).promise;
+        if (cancelled) return;
+        setRenderSize({ width: cssScale * baseViewport.width, height: cssScale * baseViewport.height });
+      } catch (e: any) {
+        if (!cancelled) setRenderError(e?.message || 'Failed to render the resume preview.');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pdfBase64]);
+
+  const fallbackHeight = Math.round(PDF_PAGE_WIDTH * (11 / 8.5));
+
+  if (!pdfBase64) {
+    return (
+      <div
+        style={{
+          width: PDF_PAGE_WIDTH,
+          height: fallbackHeight,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          padding: 32,
+          background: '#FDFCFA',
+          border: '1px solid rgba(31,27,22,0.08)',
+          borderRadius: 2,
+          boxShadow: '0 1px 2px rgba(31,27,22,0.08), 0 16px 48px rgba(31,27,22,0.14)',
+          color: '#5A5247',
+          fontSize: 13,
+          boxSizing: 'border-box',
+        }}
+      >
+        We couldn't generate a preview of your tailored resume just now — it's still ready to download.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: renderSize?.width ?? PDF_PAGE_WIDTH,
+        height: renderSize?.height ?? fallbackHeight,
+        background: '#FDFCFA',
+        border: '1px solid rgba(31,27,22,0.08)',
+        borderRadius: 2,
+        boxShadow: '0 1px 2px rgba(31,27,22,0.08), 0 16px 48px rgba(31,27,22,0.14)',
+        boxSizing: 'border-box',
+        animation: 'rise 0.5s ease 0.1s both',
+      }}
+    >
+      <canvas ref={canvasRef} style={{ display: 'block', borderRadius: 2 }} />
+      {renderError && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 32,
+            textAlign: 'center',
+            fontSize: 13,
+            color: '#a33',
+          }}
+        >
+          {renderError}
+        </div>
+      )}
+      {renderSize &&
+        bulletPositions.map((pos) => (
+          <TailoredBulletMarker
+            key={pos.bullet_id}
+            position={pos}
+            rewritten={rewrittenSet.has(pos.bullet_id)}
+            hovered={hovered}
+            onHover={onHover}
+          />
+        ))}
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -1079,6 +1112,7 @@ const CritiquePage: React.FC = () => {
         structured: data.structured_resume,
         pdfBase64: data.pdf_base64,
         rewrittenIds: data.rewritten_bullet_ids ?? [],
+        bulletPositions: data.bullet_positions ?? [],
       });
       setActiveTab('tailored');
       setViewMode('compare');
@@ -1600,11 +1634,23 @@ const CritiquePage: React.FC = () => {
             <div className="flex flex-col items-center" style={{ gap: 11, animation: 'rise 0.4s ease both' }}>
               <ZoomControl zoom={singleZoom} onChange={setSingleZoom} />
               <div style={{ zoom: singleZoom }}>
-                <ResumeDiffPage
-                  blocks={buildDiffBlocks(result, tailoredResult.structured, tailoredResult.rewrittenIds)}
-                  variant={activeTab}
-                  showChanges
-                />
+                {activeTab === 'current' ? (
+                  <CritiqueResumePdfPage
+                    pdfBase64={result.pdf_base64}
+                    bulletPositions={result.bullet_positions ?? []}
+                    flagByBulletId={flagByBulletId}
+                    hovered={hovered}
+                    onHover={setHovered}
+                  />
+                ) : (
+                  <TailoredResumePdfPage
+                    pdfBase64={tailoredResult.pdfBase64}
+                    bulletPositions={tailoredResult.bulletPositions}
+                    rewrittenIds={tailoredResult.rewrittenIds}
+                    hovered={hovered}
+                    onHover={setHovered}
+                  />
+                )}
               </div>
             </div>
           ) : (
@@ -1618,10 +1664,12 @@ const CritiquePage: React.FC = () => {
                   <ZoomControl zoom={currentZoom} onChange={setCurrentZoom} />
                 </div>
                 <div style={{ zoom: currentZoom, borderRadius: 2 }}>
-                  <ResumeDiffPage
-                    blocks={buildDiffBlocks(result, tailoredResult.structured, tailoredResult.rewrittenIds)}
-                    variant="current"
-                    showChanges
+                  <CritiqueResumePdfPage
+                    pdfBase64={result.pdf_base64}
+                    bulletPositions={result.bullet_positions ?? []}
+                    flagByBulletId={flagByBulletId}
+                    hovered={hovered}
+                    onHover={setHovered}
                   />
                 </div>
               </div>
@@ -1634,10 +1682,12 @@ const CritiquePage: React.FC = () => {
                   <ZoomControl zoom={tailoredZoom} onChange={setTailoredZoom} />
                 </div>
                 <div style={{ zoom: tailoredZoom, borderRadius: 2, boxShadow: '0 0 0 2px hsl(142 72% 45% / 0.28)' }}>
-                  <ResumeDiffPage
-                    blocks={buildDiffBlocks(result, tailoredResult.structured, tailoredResult.rewrittenIds)}
-                    variant="tailored"
-                    showChanges
+                  <TailoredResumePdfPage
+                    pdfBase64={tailoredResult.pdfBase64}
+                    bulletPositions={tailoredResult.bulletPositions}
+                    rewrittenIds={tailoredResult.rewrittenIds}
+                    hovered={hovered}
+                    onHover={setHovered}
                   />
                 </div>
               </div>
