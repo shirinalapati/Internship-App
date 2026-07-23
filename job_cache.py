@@ -15,7 +15,7 @@ from job_database import (
     init_database, bulk_insert_jobs, get_active_jobs,
     get_active_jobs_paginated, get_job_count,
     get_new_jobs_since, get_database_stats, record_cache_operation,
-    cleanup_old_metadata
+    cleanup_old_metadata, get_distinct_active_companies
 )
 
 # Redis configuration
@@ -23,6 +23,12 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 CACHE_KEY = "internship_jobs_cache"
 CACHE_TTL = 2 * 60 * 60  # 2 hours in seconds (reduced from 4h to limit Redis memory footprint)
 LAST_SCRAPE_KEY = "last_scrape_time"
+
+# Distinct-company list backing the avoid/target-company filter autocomplete.
+# Small payload (low hundreds of names) so it's cached as a single JSON blob —
+# no need for the chunked list-streaming used for the full jobs cache.
+COMPANIES_CACHE_KEY = "internship_companies_cache"
+COMPANIES_CACHE_TTL = CACHE_TTL  # same freshness window as the jobs cache
 
 # Initialize Redis client
 redis_client = None
@@ -290,8 +296,62 @@ def set_cached_jobs(jobs: List[Dict], cache_type: str = 'daily') -> Dict:
             redis_client.set(LAST_SCRAPE_KEY, datetime.utcnow().isoformat())
         except:
             pass
-    
+
+    # Recompute the distinct-companies cache now, at write time, rather than
+    # leaving it to whichever request happens to miss the cache next. Keeps
+    # the avoid/target-company autocomplete in sync with every scrape without
+    # a separate cron.
+    if summary['database_success']:
+        refresh_companies_cache()
+
     return summary
+
+def refresh_companies_cache() -> int:
+    """Recompute the distinct-active-companies list from the database and
+    push it into Redis. Called after every successful scrape write; also
+    safe to call directly (e.g. from a lazy cache-miss fallback)."""
+    if not database_initialized:
+        return 0
+    try:
+        companies = get_distinct_active_companies()
+        if redis_client and companies:
+            redis_client.setex(COMPANIES_CACHE_KEY, COMPANIES_CACHE_TTL, json.dumps(companies))
+        return len(companies)
+    except Exception as e:
+        logger.error(f"refresh_companies_cache failed: {e}")
+        return 0
+
+def get_cached_companies() -> List[str]:
+    """
+    Distinct active-job company names, hybrid Redis + DB (same tiering as
+    get_cached_jobs): Redis first, DB fallback with a lazy cache warm.
+    """
+    if redis_client:
+        try:
+            cached = redis_client.get(COMPANIES_CACHE_KEY)
+            if cached:
+                return json.loads(cached)
+        except redis.RedisError as e:
+            logger.warning(f"Redis error while getting companies cache: {e}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in companies cache: {e}")
+            try:
+                redis_client.delete(COMPANIES_CACHE_KEY)
+            except Exception:
+                pass
+
+    # Redis miss/unavailable — read straight from the database and, if
+    # possible, warm Redis so the next request doesn't repeat the query.
+    if database_initialized:
+        companies = get_distinct_active_companies()
+        if redis_client and companies:
+            try:
+                redis_client.setex(COMPANIES_CACHE_KEY, COMPANIES_CACHE_TTL, json.dumps(companies))
+            except redis.RedisError:
+                pass
+        return companies
+
+    return []
 
 def get_cache_info() -> Dict:
     """Get comprehensive cache metadata from both Redis and Database"""
@@ -383,6 +443,7 @@ def clear_cache() -> Dict:
         try:
             redis_client.delete(CACHE_KEY)
             redis_client.delete(LAST_SCRAPE_KEY)
+            redis_client.delete(COMPANIES_CACHE_KEY)
             result["redis"] = True
             logger.info("Redis cache cleared successfully")
         except redis.RedisError as e:

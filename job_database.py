@@ -90,6 +90,7 @@ class ResumeCache(Base):
     resume_hash = Column(String(255), nullable=False, index=True)
     results = Column(Text, nullable=False)
     skills = Column(Text, nullable=False)
+    filters = Column(Text, nullable=True)  # JSON string of the filters applied (for history display)
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
     __table_args__ = (Index('idx_user_hash', 'user_id', 'resume_hash'),)
@@ -410,10 +411,33 @@ def _api_key_to_dict(row: "ApiKey") -> Dict:
 
 
 # Database initialization
+def _run_lightweight_migrations():
+    """Add columns introduced after a table was first created.
+
+    create_all() only creates missing TABLES, not missing COLUMNS, and this project
+    has no Alembic migrations — so new nullable columns are added here idempotently
+    for both SQLite (dev) and PostgreSQL (prod).
+    """
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    try:
+        existing = {c["name"] for c in inspector.get_columns("resume_cache")}
+    except Exception:
+        return  # table doesn't exist yet (create_all will have made it with the column)
+    if "filters" not in existing:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE resume_cache ADD COLUMN filters TEXT"))
+            logger.info("Migration: added resume_cache.filters column")
+        except Exception as e:
+            logger.warning(f"Migration to add resume_cache.filters failed (continuing): {e}")
+
+
 def init_database():
     """Initialize database tables"""
     try:
         Base.metadata.create_all(bind=engine)
+        _run_lightweight_migrations()
         _ensure_saved_jobs_schema()
         _ensure_embedding_column()
         _ensure_category_column()
@@ -904,6 +928,32 @@ def get_active_jobs(limit: Optional[int] = None, offset: int = 0, max_days_old: 
         close_db(db)
 
 
+def get_distinct_active_companies() -> List[str]:
+    """
+    Distinct company names across active job postings, sorted alphabetically.
+
+    Backs the avoid/target-company filter autocomplete — matching against these
+    exact scraped strings (instead of a hand-typed guess) avoids canonicalization
+    mismatches like "JPMorgan Chase" vs the scraped "JP Morgan Chase". Small
+    result set (low hundreds), so no pagination needed.
+    """
+    db = get_db()
+    try:
+        rows = (
+            db.query(Job.company)
+            .filter(Job.is_active == True, Job.company.isnot(None), Job.company != "")
+            .distinct()
+            .order_by(Job.company)
+            .all()
+        )
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.error(f"Error getting distinct active companies: {e}")
+        return []
+    finally:
+        close_db(db)
+
+
 def get_active_jobs_paginated(offset: int = 0, limit: int = 500, max_days_old: int = 30) -> List[Dict]:
     """
     Get a single page of active jobs from the database.
@@ -1240,6 +1290,7 @@ def get_user_resume_history(user_id: str) -> List[Dict]:
                 "resume_hash": e.resume_hash,
                 "results": json.loads(e.results),
                 "skills": json.loads(e.skills),
+                "filters": json.loads(e.filters) if getattr(e, "filters", None) else None,
                 "created_at": e.created_at.isoformat(),
                 "expires_at": e.expires_at.isoformat(),
             }
@@ -1249,8 +1300,8 @@ def get_user_resume_history(user_id: str) -> List[Dict]:
         db.close()
 
 
-def set_resume_cache(user_id: str, resume_hash: str, results: list, skills: list) -> None:
-    """Upsert cache entry with 24h TTL."""
+def set_resume_cache(user_id: str, resume_hash: str, results: list, skills: list, filters: Optional[dict] = None) -> None:
+    """Upsert cache entry with 30d TTL. ``filters`` is the filter set applied (for history display)."""
     db = get_db()
     try:
         db.query(ResumeCache).filter(
@@ -1262,6 +1313,7 @@ def set_resume_cache(user_id: str, resume_hash: str, results: list, skills: list
             resume_hash=resume_hash,
             results=json.dumps(results),
             skills=json.dumps(skills),
+            filters=json.dumps(filters) if filters else None,
             expires_at=datetime.utcnow() + timedelta(days=30)
         )
         db.add(entry)

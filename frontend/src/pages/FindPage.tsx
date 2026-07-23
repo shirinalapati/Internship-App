@@ -5,6 +5,7 @@ import Header from '../components/Header';
 import JobCard from '../components/JobCard';
 import { Job } from '../types';
 import { ThinkDeeperToggle } from '../components/ui/think-deeper-toggle';
+import JobFilters, { JobFilterState, EMPTY_FILTERS, isFilterActive, filterSignature } from '../components/JobFilters';
 import { DepartmentMultiSelect } from '../components/ui/department-multi-select';
 import { Upload, AlertCircle, CheckCircle2, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, Clock, RefreshCcw } from 'lucide-react';
 
@@ -46,6 +47,23 @@ const PROGRESS_MILESTONES = [
   { label: 'Complete', threshold: 100 },
 ];
 
+// Convert the frontend filter state into the snake_case payload the backend expects.
+const buildFiltersPayload = (f: JobFilterState) => ({
+  locations: f.locations,
+  positions: f.positions,
+  target_companies: f.targetCompanies,
+  company_sizes: f.companySizes,
+  citizenship: f.citizenship,
+  avoid_companies: f.avoidCompanies,
+});
+
+// Small, URL-safe string hash (djb2) used to namespace the result cache per filter set.
+const cheapHash = (s: string): string => {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(16);
+};
+
 const FindPage: React.FC = () => {
   const { getToken, isSignedIn } = useAuth();
   const { openSignIn } = useClerk();
@@ -59,6 +77,7 @@ const FindPage: React.FC = () => {
   const [currentStep, setCurrentStep] = useState('');
   const [useStreaming] = useState(true);
   const [thinkDeeper, setThinkDeeper] = useState(true);
+  const [filters, setFilters] = useState<JobFilterState>(EMPTY_FILTERS);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fromCache, setFromCache] = useState(false);
@@ -90,12 +109,14 @@ const FindPage: React.FC = () => {
           lastModified: meta.lastModified || Date.now(),
         });
         const restoredThinkDeeper: boolean = meta.thinkDeeper ?? true;
+        const restoredFilters: JobFilterState = meta.filters ?? EMPTY_FILTERS;
         const restoredCategories: string[] = Array.isArray(meta.categories) ? meta.categories : [];
 
         setSelectedFile(file);
         setThinkDeeper(restoredThinkDeeper);
+        setFilters(restoredFilters);
         setSelectedCategories(restoredCategories);
-        handleFileUploadStreaming(file, restoredThinkDeeper, restoredCategories);
+        handleFileUploadStreaming(file, restoredThinkDeeper, restoredFilters, restoredCategories);
       } catch (e) {
         sessionStorage.removeItem(PENDING_RESUME_DATA_KEY);
         sessionStorage.removeItem(PENDING_RESUME_META_KEY);
@@ -181,13 +202,18 @@ const FindPage: React.FC = () => {
     });
   };
 
-  const handleFileUploadStreaming = async (file: File, thinkDeeperOverride?: boolean, categoriesOverride?: string[]) => {
+  const handleFileUploadStreaming = async (file: File, thinkDeeperOverride?: boolean, filtersOverride?: JobFilterState, categoriesOverride?: string[]) => {
     const useThinkDeeper = thinkDeeperOverride ?? thinkDeeper;
+    const activeFilters = filtersOverride ?? filters;
+    const filtersActive = isFilterActive(activeFilters);
     // Department selection is part of the cache identity: a different selection
     // must be a fresh search, not the previous selection's cached results.
     const useCategories = categoriesOverride ?? selectedCategories;
     setFromCache(false);
-    const resumeHash = await hashFile(file);
+    const baseHash = await hashFile(file);
+    // Namespace the cache key by filter combination so a filtered search never
+    // returns the unfiltered (or differently-filtered) cached result.
+    const resumeHash = filtersActive ? `${baseHash}-${cheapHash(filterSignature(activeFilters))}` : baseHash;
 
     const token = await getToken();
     setAuthToken(token);
@@ -226,6 +252,9 @@ const FindPage: React.FC = () => {
       formData.append('resume', file);
       formData.append('think_deeper', useThinkDeeper.toString());
       formData.append('resume_hash', resumeHash);
+      if (filtersActive) {
+        formData.append('filters', JSON.stringify(buildFiltersPayload(activeFilters)));
+      }
       formData.append('categories', useCategories.join(','));
 
       const response = await fetch(`${API_BASE_URL}/api/match-stream`, {
@@ -344,6 +373,7 @@ const FindPage: React.FC = () => {
             type: selectedFile.type,
             lastModified: selectedFile.lastModified,
             thinkDeeper,
+            filters,
             categories: selectedCategories,
           }));
         } catch (e) {
@@ -442,7 +472,7 @@ const FindPage: React.FC = () => {
     <div className="min-h-screen bg-bg text-text-primary">
       <Header />
 
-      <main className="max-w-[860px] mx-auto px-6 py-12 space-y-0">
+      <main className="max-w-[1080px] mx-auto px-6 py-12 space-y-0">
 
         {/* Hero */}
         <div className="pt-6 pb-10 border-b border-lp-border">
@@ -460,9 +490,10 @@ const FindPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Upload card */}
+        {/* Upload card + filters sidebar */}
         <div className="py-8 border-b border-lp-border">
-          <div className="max-w-2xl">
+          <div className="flex flex-col lg:flex-row lg:gap-10 lg:items-start">
+          <div className="flex-1 min-w-0 lg:max-w-2xl">
             <div className="flex items-center gap-2 mb-5">
               <Upload className="h-4 w-4 text-text-secondary" />
               <span className="font-mono text-[10px] uppercase tracking-widest text-text-secondary">
@@ -539,6 +570,12 @@ const FindPage: React.FC = () => {
                 )}
               </button>
             </form>
+          </div>
+
+            {/* Filters — right sidebar (stacks below upload on mobile) */}
+            <aside className="w-full lg:w-80 lg:flex-shrink-0 mt-8 lg:mt-0">
+              <JobFilters value={filters} onChange={setFilters} disabled={isLoading} alwaysOpen />
+            </aside>
           </div>
         </div>
 

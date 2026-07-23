@@ -4,7 +4,8 @@ import { Link } from 'react-router-dom';
 import Header from '../components/Header';
 import JobCard from '../components/JobCard';
 import { Job } from '../types';
-import { Clock, ChevronDown, ChevronUp, Upload } from 'lucide-react';
+import { Clock, ChevronDown, ChevronUp, Upload, SlidersHorizontal } from 'lucide-react';
+import { describeStoredFilters, StoredFilters } from '../lib/filterLabels';
 
 const getApiBaseUrl = (): string => {
   if (typeof window !== 'undefined') {
@@ -25,6 +26,7 @@ interface HistoryEntry {
   resume_hash: string;
   results: Job[];
   skills: string[];
+  filters: StoredFilters | null;
   created_at: string;
   expires_at: string;
 }
@@ -181,6 +183,7 @@ const HistoryPage: React.FC = () => {
               const expanded = expandedId === entry.id;
               const expired = isExpired(entry.expires_at);
               const mode = analysisLabel(entry.resume_hash);
+              const filterGroups = describeStoredFilters(entry.filters);
 
               const gradientBar = mode === 'Think Deeper'
                 ? 'bg-gradient-to-b from-red-500/60 to-transparent'
@@ -235,6 +238,23 @@ const HistoryPage: React.FC = () => {
                                   +{entry.skills.length - 8} more
                                 </span>
                               )}
+                            </div>
+                          )}
+
+                          {/* Filters used */}
+                          {filterGroups.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                              <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-text-tertiary">
+                                <SlidersHorizontal className="h-3 w-3" /> Filters
+                              </span>
+                              {filterGroups.map((g) => (
+                                <span
+                                  key={g.label}
+                                  className="font-mono text-[10px] px-1.5 py-0.5 border border-lp-border text-text-secondary"
+                                >
+                                  <span className="text-text-tertiary">{g.label}:</span> {g.values.join(', ')}
+                                </span>
+                              ))}
                             </div>
                           )}
 
