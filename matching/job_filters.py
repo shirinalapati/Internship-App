@@ -2,7 +2,7 @@
 Deterministic, user-controlled job filters applied BEFORE the LLM matching stage.
 
 These filters are hard constraints supplied by the user on the frontend (location,
-position, company size, U.S. citizenship requirement, companies to avoid). Applying
+company size, U.S. citizenship requirement, companies to avoid). Applying
 them before scoring keeps results relevant and avoids paying for LLM analysis on jobs
 the user has explicitly excluded.
 
@@ -15,31 +15,6 @@ import re
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Position categories — map a user-facing category to keywords matched against
-# the job title AND description. A job passes the position filter if it matches
-# ANY selected category.
-#
-# Keywords are surrounded by word boundaries at match time, so short tokens like
-# "ai" / "ml" / "qa" don't produce false positives inside larger words.
-# ---------------------------------------------------------------------------
-POSITION_KEYWORDS: Dict[str, List[str]] = {
-    "software_engineer": ["software engineer", "swe", "software development", "software developer", "programmer"],
-    "frontend": ["frontend", "front-end", "front end", "ui engineer", "web developer"],
-    "backend": ["backend", "back-end", "back end", "api"],
-    "fullstack": ["full stack", "fullstack", "full-stack"],
-    "data_science": ["data science", "data scientist", "data analyst", "data analytics", "analytics", "analyst"],
-    "data_engineering": ["data engineer", "data engineering", "etl", "data platform"],
-    "machine_learning": ["machine learning", "ml engineer", "ml", "artificial intelligence", "ai", "deep learning", "nlp", "computer vision", "llm"],
-    "mobile": ["mobile", "ios", "android", "react native", "flutter", "kotlin", "swift"],
-    "cloud": ["cloud", "cloud engineer", "aws", "azure", "gcp", "google cloud"],
-    "devops": ["devops", "sre", "site reliability", "infrastructure", "platform engineer", "ci/cd"],
-    "security": ["security", "cyber", "cybersecurity", "infosec", "appsec"],
-    "qa": ["qa", "sdet", "test", "testing", "quality assurance", "quality engineer"],
-    "hardware": ["hardware", "embedded", "firmware", "fpga", "asic", "verilog", "vhdl"],
-}
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +111,7 @@ def _company_names_match(a_canonical: str, b_canonical: str) -> bool:
         return False
     if a_canonical == b_canonical:
         return True
-    if _matches_position_keyword(b_canonical, a_canonical) or _matches_position_keyword(a_canonical, b_canonical):
+    if _matches_word_boundary(b_canonical, a_canonical) or _matches_word_boundary(a_canonical, b_canonical):
         return True
     a_spaceless = a_canonical.replace(" ", "")
     b_spaceless = b_canonical.replace(" ", "")
@@ -158,7 +133,7 @@ def _company_is_large(company: str) -> bool:
     return canonical in LARGE_COMPANIES
 
 
-def _matches_position_keyword(text: str, keyword: str) -> bool:
+def _matches_word_boundary(text: str, keyword: str) -> bool:
     """Word-boundary keyword match (so 'ai'/'ml'/'qa' don't match inside words)."""
     return re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text) is not None
 
@@ -226,11 +201,8 @@ def normalize_filters(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         elif s in ("not_large", "startup", "midsize", "mid-size", "small"):
             company_sizes.add("not_large")
 
-    positions = {p for p in (_normalize(x) for x in _as_str_list(raw.get("positions"))) if p in POSITION_KEYWORDS}
-
     return {
         "locations": _as_str_list(raw.get("locations")),
-        "positions": sorted(positions),
         "company_sizes": sorted(company_sizes),
         "citizenship": citizenship,
         "avoid_companies": _as_str_list(raw.get("avoid_companies")),
@@ -245,7 +217,6 @@ def has_active_filters(normalized: Dict[str, Any]) -> bool:
         return False
     return bool(
         normalized.get("locations")
-        or normalized.get("positions")
         or normalized.get("company_sizes")
         or normalized.get("avoid_companies")
         or normalized.get("target_companies")
@@ -279,7 +250,7 @@ _STATE_ABBREVS: Dict[str, str] = {
 # Keys are the full name a user would type (normalized); values are the
 # additional short tokens to also check. Short tokens are matched with the
 # same word-boundary regex used everywhere else in this module (see
-# _matches_position_keyword) — never a bare substring check — so "LA"
+# _matches_word_boundary) — never a bare substring check — so "LA"
 # doesn't match inside "Atlanta" or "Dallas".
 CITY_ALIASES: Dict[str, List[str]] = {
     "new york": ["nyc"],
@@ -308,26 +279,13 @@ def _passes_location(job: Dict[str, Any], locations: List[str]) -> bool:
         # typing the bare abbreviation "CA") must not match the start of
         # ", Canada". Multi-word phrases ("san jose, ca") still match fine
         # since the boundary only has to hold at the phrase's own edges.
-        if _matches_position_keyword(job_location, loc_l):
+        if _matches_word_boundary(job_location, loc_l):
             return True
         abbrev = _STATE_ABBREVS.get(loc_l)
         if abbrev and re.search(rf",\s*{re.escape(abbrev)}\b", job_location):
             return True
         for alias in CITY_ALIASES.get(loc_l, []):
-            if _matches_position_keyword(job_location, alias):
-                return True
-    return False
-
-
-def _passes_position(job: Dict[str, Any], positions) -> bool:
-    if not positions:
-        return True
-    # Match against title AND description — SimplifyJobs listings often carry a
-    # generic title ("Summer 2026 Intern") with the real role in the description.
-    haystack = f"{_normalize(job.get('title', ''))} {_normalize(job.get('description', ''))}"
-    for category in positions:
-        for kw in POSITION_KEYWORDS.get(category, []):
-            if _matches_position_keyword(haystack, kw):
+            if _matches_word_boundary(job_location, alias):
                 return True
     return False
 
@@ -390,7 +348,6 @@ def apply_normalized_filters(jobs: List[Dict[str, Any]], normalized: Dict[str, A
         return jobs
 
     locations = normalized["locations"]
-    positions = normalized["positions"]
     company_sizes = normalized["company_sizes"]
     citizenship = normalized["citizenship"]
     avoid_companies = normalized["avoid_companies"]
@@ -401,14 +358,13 @@ def apply_normalized_filters(jobs: List[Dict[str, Any]], normalized: Dict[str, A
         if _passes_avoid_companies(job, avoid_companies)
         and _passes_target_companies(job, target_companies)
         and _passes_location(job, locations)
-        and _passes_position(job, positions)
         and _passes_company_size(job, company_sizes)
         and _passes_citizenship(job, citizenship)
     ]
 
     logger.info(
         f"[Filters] {len(filtered)}/{len(jobs)} jobs passed "
-        f"(locations={locations}, positions={sorted(positions)}, "
+        f"(locations={locations}, "
         f"company_sizes={sorted(company_sizes)}, citizenship={citizenship}, "
         f"avoid={avoid_companies}, target={target_companies})"
     )

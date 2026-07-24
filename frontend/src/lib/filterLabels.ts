@@ -9,23 +9,6 @@ export interface Option<T extends string = string> {
   label: string;
 }
 
-// Position category ids MUST match POSITION_KEYWORDS keys in matching/job_filters.py
-export const POSITION_OPTIONS: Option[] = [
-  { id: 'software_engineer', label: 'Software Engineer' },
-  { id: 'frontend', label: 'Frontend' },
-  { id: 'backend', label: 'Backend' },
-  { id: 'fullstack', label: 'Full Stack' },
-  { id: 'data_science', label: 'Data Science / Analytics' },
-  { id: 'data_engineering', label: 'Data Engineering' },
-  { id: 'machine_learning', label: 'ML / AI' },
-  { id: 'mobile', label: 'Mobile' },
-  { id: 'cloud', label: 'Cloud' },
-  { id: 'devops', label: 'DevOps / SRE' },
-  { id: 'security', label: 'Security' },
-  { id: 'qa', label: 'QA / Test' },
-  { id: 'hardware', label: 'Hardware / Embedded' },
-];
-
 // Only large/enterprise employers can be identified reliably, so size collapses
 // to two honest buckets.
 export const COMPANY_SIZE_OPTIONS: Option[] = [
@@ -48,9 +31,6 @@ export const BIG_COMPANIES: string[] = [
   'JPMorgan Chase', 'Goldman Sachs', 'Capital One',
 ];
 
-const POSITION_LABELS: Record<string, string> = Object.fromEntries(
-  POSITION_OPTIONS.map((o) => [o.id, o.label])
-);
 const COMPANY_SIZE_LABELS: Record<string, string> = Object.fromEntries(
   COMPANY_SIZE_OPTIONS.map((o) => [o.id, o.label])
 );
@@ -62,7 +42,6 @@ const CITIZENSHIP_LABELS: Record<string, string> = Object.fromEntries(
 // mirrors buildFiltersPayload on the Find page and normalize_filters on the backend).
 export interface StoredFilters {
   locations?: string[];
-  positions?: string[];
   company_sizes?: string[];
   citizenship?: string;
   avoid_companies?: string[];
@@ -80,9 +59,6 @@ export function describeStoredFilters(f: StoredFilters | null | undefined): Filt
   const groups: FilterGroup[] = [];
 
   if (f.locations?.length) groups.push({ label: 'Location', values: f.locations });
-  if (f.positions?.length) {
-    groups.push({ label: 'Position', values: f.positions.map((p) => POSITION_LABELS[p] ?? p) });
-  }
   if (f.target_companies?.length) {
     groups.push({ label: 'Companies', values: f.target_companies });
   }

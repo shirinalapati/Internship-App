@@ -6,7 +6,6 @@ import { LOCATION_SUGGESTIONS } from '../lib/filterSuggestions';
 import { useCompanySuggestions } from '../hooks/useCompanySuggestions';
 import {
   CitizenshipPref,
-  POSITION_OPTIONS,
   COMPANY_SIZE_OPTIONS,
   CITIZENSHIP_OPTIONS,
   BIG_COMPANIES,
@@ -16,7 +15,6 @@ export type { CitizenshipPref };
 
 export interface JobFilterState {
   locations: string[];        // selected location tags
-  positions: string[];        // category ids (see POSITION_OPTIONS)
   targetCompanies: string[];  // specific big companies to restrict results to
   companySizes: string[];     // 'large' | 'not_large'
   citizenship: CitizenshipPref;
@@ -25,7 +23,6 @@ export interface JobFilterState {
 
 export const EMPTY_FILTERS: JobFilterState = {
   locations: [],
-  positions: [],
   targetCompanies: [],
   companySizes: [],
   citizenship: 'any',
@@ -35,7 +32,6 @@ export const EMPTY_FILTERS: JobFilterState = {
 export function isFilterActive(f: JobFilterState): boolean {
   return Boolean(
     f.locations.length ||
-    f.positions.length ||
     f.targetCompanies.length ||
     f.companySizes.length ||
     f.avoidCompanies.length ||
@@ -48,7 +44,6 @@ export function filterSignature(f: JobFilterState): string {
   const norm = (arr: string[]) => [...arr].map(s => s.trim().toLowerCase()).filter(Boolean).sort().join('|');
   return [
     norm(f.locations),
-    [...f.positions].sort().join('|'),
     norm(f.targetCompanies),
     [...f.companySizes].sort().join('|'),
     f.citizenship,
@@ -77,7 +72,6 @@ const JobFilters: React.FC<JobFiltersProps> = ({ value, onChange, disabled, alwa
 
   const activeCount =
     value.locations.length +
-    value.positions.length +
     value.targetCompanies.length +
     value.companySizes.length +
     value.avoidCompanies.length +
@@ -205,18 +199,6 @@ const JobFilters: React.FC<JobFiltersProps> = ({ value, onChange, disabled, alwa
               ariaLabel="Add a location filter"
             />
             <p className="font-mono text-[10px] text-text-tertiary mt-1">Add multiple — results match any of them.</p>
-          </div>
-
-          {/* Position */}
-          <div>
-            {sectionLabel('Position')}
-            <div className="flex flex-wrap gap-1.5">
-              {POSITION_OPTIONS.map(opt =>
-                chip(value.positions.includes(opt.id), opt.label, () =>
-                  onChange({ ...value, positions: toggleInArray(value.positions, opt.id) })
-                )
-              )}
-            </div>
           </div>
 
           {/* Big companies */}
