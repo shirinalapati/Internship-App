@@ -50,7 +50,6 @@ const PROGRESS_MILESTONES = [
 // Convert the frontend filter state into the snake_case payload the backend expects.
 const buildFiltersPayload = (f: JobFilterState) => ({
   locations: f.locations,
-  positions: f.positions,
   target_companies: f.targetCompanies,
   company_sizes: f.companySizes,
   citizenship: f.citizenship,

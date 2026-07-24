@@ -3,8 +3,7 @@ Tests for matching/job_filters.py
 
 Pure logic, no external services — covers the edge cases called out in review:
 company-size substring false positives, citizenship phrase detection,
-location matching, position keyword matching (title + description), and
-the normalize/apply contract.
+location matching, and the normalize/apply contract.
 """
 import pytest
 
@@ -12,7 +11,6 @@ from matching.job_filters import (
     _company_is_large,
     _passes_citizenship,
     _passes_location,
-    _passes_position,
     _passes_company_size,
     _passes_avoid_companies,
     _passes_target_companies,
@@ -169,36 +167,6 @@ class TestLocation:
 
 
 # ---------------------------------------------------------------------------
-# _passes_position — title + description, word-boundary short tokens
-# ---------------------------------------------------------------------------
-class TestPosition:
-    def test_no_filter(self):
-        assert _passes_position(_job(title="Software Engineer Intern"), set()) is True
-
-    def test_title_match(self):
-        assert _passes_position(_job(title="Frontend Engineer Intern"), {"frontend"}) is True
-
-    def test_description_match_when_title_generic(self):
-        # Generic title, role detail only in the description.
-        job = _job(title="Summer 2026 Intern", description="Work on our machine learning platform")
-        assert _passes_position(job, {"machine_learning"}) is True
-
-    def test_short_token_word_boundary(self):
-        # "ai" should not match inside "maintain"; should match standalone "AI".
-        assert _passes_position(_job(title="Software Maintainer Intern"), {"machine_learning"}) is False
-        assert _passes_position(_job(title="AI Research Intern"), {"machine_learning"}) is True
-
-    def test_cloud_category(self):
-        assert _passes_position(_job(title="Cloud Engineer Intern"), {"cloud"}) is True
-
-    def test_kotlin_mobile(self):
-        assert _passes_position(_job(title="Intern", description="Android app in Kotlin"), {"mobile"}) is True
-
-    def test_no_match(self):
-        assert _passes_position(_job(title="Marketing Intern"), {"backend"}) is False
-
-
-# ---------------------------------------------------------------------------
 # _passes_avoid_companies
 # ---------------------------------------------------------------------------
 class TestAvoidCompanies:
@@ -273,9 +241,8 @@ class TestNormalizeAndApply:
         n = normalize_filters({"company_sizes": ["startup", "midsize"]})
         assert n["company_sizes"] == ["not_large"]
 
-    def test_normalize_drops_invalid_position_and_citizenship(self):
-        n = normalize_filters({"positions": ["frontend", "bogus"], "citizenship": "weird"})
-        assert n["positions"] == ["frontend"]
+    def test_normalize_drops_invalid_citizenship(self):
+        n = normalize_filters({"citizenship": "weird"})
         assert n["citizenship"] == "any"
 
     def test_apply_end_to_end(self):
